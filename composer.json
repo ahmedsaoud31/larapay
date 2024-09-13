@@ -1,0 +1,32 @@
+{
+  "name": "ahmedsaoud31/larapay",
+  "description": "Larapay is a free Laravel Payment Gatway package.",
+  "license": "MIT",
+  "keywords": [],
+  "autoload": {
+    "psr-4": {
+      "Larapay\\": "src/"
+    }
+  },
+  "require": {
+    "php": ">=7.0",
+    "laravel/framework": ">=10.0"
+  },
+  "authors": [
+    {
+      "name": "Ahmed Aboelsaoud",
+      "email": "ahmedsaoud31@gmail.com"
+    }
+  ],
+  "extra": {
+    "laravel": {
+      "providers": [
+        "Larapay\\LarapayServiceProvider"
+      ],
+      "aliases": {
+        "Larapay": "Larapay\\Facades\\Larapay"
+      }
+    }
+  },
+  "minimum-stability": "dev"
+}
