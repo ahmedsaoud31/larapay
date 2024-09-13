@@ -1,7 +1,7 @@
 {
   "name": "ahmedsaoud31/larapay",
   "description": "Larapay is a free Laravel Payment Gatway package.",
-  "version": "v1.0-BETA",
+  "version": "1.0.0-dev",
   "license": "MIT",
   "keywords": [],
   "autoload": {
