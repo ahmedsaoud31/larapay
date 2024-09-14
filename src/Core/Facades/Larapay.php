@@ -3,7 +3,7 @@
 namespace Larapay\Facades;
 
 use Illuminate\Support\Facades\Facade;
-use Larapay\Core\Larapay as LarapayCore;
+use Larapay\Larapay as LarapayCore;
 
 class Larapay extends Facade
 {

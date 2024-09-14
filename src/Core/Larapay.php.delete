@@ -13,11 +13,15 @@ class Larapay
     protected ?string $first_name = null, 
     protected ?string $last_name = null, 
     protected ?float $amount = null, 
-    protected ?float $profile_id = null, 
-    protected ?float $tran_type = null, 
-    protected ?float $tran_class = null, 
-    protected ?float $callback = null, 
-    protected ?float $return = null, 
+    protected ?string $profile_id = null, 
+    protected ?string $tran_type = null, 
+    protected ?string $tran_class = null, 
+    protected ?string $callback = null, 
+    protected ?string $return = null, 
+    protected ?string $cart_id = null, 
+    protected ?string $cart_currency = null, 
+    protected ?string $cart_amount = null, 
+    protected ?string $cart_description = null, 
   )
   {
     $this->gateway = config("larapay.gateway");
@@ -39,6 +43,20 @@ class Larapay
     ): Larapay
   {
     $this->gateway = $gateway ?? $this->gateway;
+    if($gateway){
+      switch($gateway){
+        case "paypal":
+          return (new PayPal)->config();
+          break;
+        case "paytabs":
+          return (new PayTabs)->config();
+          break;
+        default:
+        return (new PayPal)->config();
+      }
+    }else{
+      
+    }
     $this->provider = $provider ?? $this->provider;
     $this->mode = $mode ?? $this->mode;
     $this->profile_id = $profile_id ?? $this->profile_id;
@@ -64,6 +82,14 @@ class Larapay
     $this->first_name = $first_name ?? $this->first_name;
     $this->last_name = $last_name ?? $this->last_name;
     $this->amount = $amount ?? $this->amount;
+    $this->cart_id = $cart_id ?? $this->cart_id;
+    $this->cart_currency = $cart_currency ?? $this->cart_currency;
+    $this->cart_amount = $cart_amount ?? $this->cart_amount;
+    $this->cart_description = $cart_description ?? $this->cart_description;
     return $this;
+  }
+
+  public function test() : void {
+    dd('done');
   }
 }
