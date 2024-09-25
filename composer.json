@@ -6,7 +6,8 @@
   "keywords": [],
   "autoload": {
     "psr-4": {
-      "Larapay\\": "src/"
+      "Larapay\\": "src/",
+      "Larapay\\App\\": "app/"
     }
   },
   "require": {

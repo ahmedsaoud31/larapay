@@ -3,49 +3,61 @@ namespace Larapay\Core\Traits;
 
 use Illuminate\Support\Facades\Http;
 use Illuminate\Http\Client\Response;
+use Exception;
 
 trait HTTPRequest
 {
   protected Response $response;
-  protected array $headers = [];
-  protected array $postData = [];
-  protected int $code = 0;
-  protected ?string $message = null;
+  protected ?string $redirect = null;
 
-  public function post($url, $postData, $headers): void
+  public function post($url, $postData = [], $headers = [], $options = []): void
   {
-    $this->response = Http::withHeaders($headers)->post($url, $postData);
-    if(!$this->response->successful()){
-      $this->error = $this->json()['message'] ?? __('Uknown error');
+    try{
+      $this->response = Http::withHeaders($headers)
+                              ->withOptions($options)
+                              ->post($url, $postData);
+    }catch(Exception $e){
+      throw new GatewayConnectionException($this->gateway);
     }
-    /*dd([
-      'body' => $this->response->body(),
-      'status' => $this->response->status(),
-      'successful' => $this->response->successful(),
-      'successful' => $this->response->successful(),
-      'redirect' => $this->response->redirect(),
-      'failed' => $this->response->failed(),
-      'clientError' => $this->response->clientError(),
-    ]);
-    return true;*/
+    
+    if(!$this->response->successful()){
+      $this->handleErrors();
+    }
+  }
+
+  public function get($url, $postData = [], $headers = [], $options = []): void
+  {
+    try{
+      $this->response = Http::withHeaders($headers)->get($url, $postData);
+    }catch(Exception $e){
+      throw new GatewayConnectionException($this->gateway);
+    }
+    
+    if(!$this->response->successful()){
+      $this->handleErrors();
+    }
   }
 
   public function response(): Response
   {
     return $this->response;
   }
-  public function status(): int
+  
+  public function json(): object | null
   {
-    return $this->response->status();
+    if(is_array($this->response->object()) > 0){
+      return $this->response->object()[0];
+    }
+    return $this->response->object();
   }
 
-  public function json(): array
+  public function hasRedirect(): bool
   {
-    return $this->response->json();
+    return $this->redirect ? true : false;
   }
 
-  public function body(): string
+  public function getRedirect(): string
   {
-    return $this->response->body();
+    return $this->redirect;
   }
 }

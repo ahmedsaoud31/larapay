@@ -33,6 +33,7 @@ class LarapayServiceProvider extends ServiceProvider
         $this->loadViewsFrom(__DIR__.'/../resources/views/vendor/larapay', 'larapay');
 
         $this->loadRoutes();
+        $this->loadConfig();
     }
 
     /**
@@ -46,5 +47,12 @@ class LarapayServiceProvider extends ServiceProvider
     private function loadRoutes()
     {
         $this->loadRoutesFrom(__DIR__.'/../routes/larapay.php');
+    }
+
+    private function loadConfig()
+    {
+        $this->mergeConfigFrom(
+            __DIR__.'/../config/larapay.php', 'larapay'
+        );
     }
 }

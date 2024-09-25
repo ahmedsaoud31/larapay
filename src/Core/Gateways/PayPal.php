@@ -32,6 +32,12 @@ class PayPal extends LarapayBase implements LarapayInterface
     $this->callback = config("larapay.{$this->gateway}.callback");
     $this->return = config("larapay.{$this->gateway}.return");
   }
+
+  public function init(): PayTabs
+  {
+    return $this;
+  }
+
   public function set(
     $mode = null,
     $amount = null,
@@ -48,10 +54,5 @@ class PayPal extends LarapayBase implements LarapayInterface
     $this->cart_amount = $cart_amount ?? $this->cart_amount;
     $this->cart_description = $cart_description ?? $this->cart_description;
     return $this;
-  }
-
-  public function test(): void
-  {
-    dd($this->tran_type);
   }
 }

@@ -20,4 +20,19 @@ trait Errors
   {
     return $this->error || count($this->errors) ? true : false;
   }
+
+  private function handleErrors() : void
+  {
+    $this->error = $this->json()->message ?? false;
+    if($this->json()){
+      foreach($this->json() as $key => $value){
+        if(isset($value[0])){
+          $this->errors[] = "{$key}: {$value[0]}";
+        }
+      }
+    }
+    if(!$this->hasError()){
+      $this->error = __('Uknown error');
+    }
+  }
 }
