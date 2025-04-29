@@ -33,7 +33,7 @@ class PayPal extends LarapayBase implements LarapayInterface
     $this->return = config("larapay.{$this->gateway}.return");
   }
 
-  public function init(): PayTabs
+  public function init(): PayPal
   {
     return $this;
   }

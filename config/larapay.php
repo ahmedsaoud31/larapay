@@ -36,6 +36,7 @@ return [
             'server_key' => env('PAYTABS_SANDBOX_SERVER_KEY', ''),
             'client_key' => env('PAYTABS_SANDBOX_CLIENT_KEY', ''),
         ],
+        'currency' => 'EGP',
         // named callback in paytabs docs
         'server_callback' => null,
         // named return in paytabs docs

@@ -109,7 +109,7 @@ class LarapayController extends Controller
 
   public function form()
   {
-    $larapay = (new Larapay)->init(gateway: 'paytabs');
+    $larapay = Larapay::init(gateway: 'paytabs');
     if(!$larapay->hasTocken()){
       return $larapay->getPayForm();
     }else{
@@ -135,9 +135,8 @@ class LarapayController extends Controller
 
   public function postForm()
   {
-    $larapay = new Larapay;
+    $larapay = Larapay::init(gateway: 'paytabs');
     $pay = $larapay
-            ->init(gateway: 'paytabs')
             ->set(token: request()->token)
             ->customer(
               name: 'Ahmed Aboelsaoud',

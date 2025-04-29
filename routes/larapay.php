@@ -13,4 +13,4 @@ Route::get('/larapay/check', [LarapayController::class, 'check'])->name('larapay
 Route::get('/larapay/test', [LarapayController::class, 'test'])->name('larapay.test');
 Route::any('/larapay/form', [LarapayController::class, 'form'])->name('larapay.form');
 Route::any('/larapay/{gateway}/server-callback', [LarapayController::class, 'serverCallback'])->name('larapay.server-callback');
-Route::any('/larapay/{gateway}/client-callback"', [LarapayController::class, 'clientCallback'])->name('larapay.client-callback');
+Route::any('/larapay/{gateway}/client-callback', [LarapayController::class, 'clientCallback'])->name('larapay.client-callback');
