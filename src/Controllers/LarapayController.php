@@ -159,6 +159,36 @@ class LarapayController extends Controller
     }
   }
 
+  /**
+   * Payfort (Amazon Payment Services) — hosted checkout test page.
+   * GET /larapay/payfort
+   */
+  public function payfort()
+  {
+    $larapay = Larapay::init(gateway: 'payfort');
+    $pay = $larapay
+      ->billing(
+        email: 'test@example.com',
+        name:  'Test User',
+        ip:    request()->ip(),
+      )
+      ->cart(
+        id:          uniqid(),
+        description: 'Test Payfort order',
+        amount:      100.00,
+      )
+      ->set(currency: 'USD')
+      ->pay();
+
+    if ($pay->hasError()) {
+      echo $pay->getError();
+      return;
+    }
+
+    $pay->register();
+    return $pay->getPayForm();
+  }
+
   public function kashier()
   {
     $larapay = Larapay::init(gateway: 'kashier');
@@ -242,16 +272,33 @@ class LarapayController extends Controller
         $transaction->save();
         break;
       case 'kashier':
-        // Kashier sends orderId (which we set to the larapay uid) on the redirect-back URL
         $transaction = LarapayTransaction::whereUid(request()->merchantOrderId)->firstOrFail();
-        // $transaction->refrance = request()->orderReference;
-        // Store the Kashier transactionId as our refrance
         if (request()->transactionId) {
-          $transaction->refrance = request()->query('transactionId');
+          $transaction->refrance = request()->transactionId;
           $transaction->save();
         }
         break;
+      case 'payfort':
+        // APS POSTs merchant_reference (= our uid) back to return_url
+        $transaction = LarapayTransaction::whereUid(request()->post('merchant_reference'))->firstOrFail();
+        $larapay = Larapay::init(gateway: 'payfort');
+        $verify = $larapay->verifyCallback(request()->post());
+        $transaction->refrance = request()->post('fort_id', $transaction->refrance);
+        $transaction->response = json_encode(request()->post());
+        if (!$verify->hasError() && $verify->paymentAccepted()) {
+          $transaction->status = 'success';
+        } elseif (!$verify->hasError() && $verify->paymentCancelled()) {
+          $transaction->status = 'cancelled';
+        }
+        $transaction->save();
+        return view('larapay::gateways.kashier.result', [
+          'status'      => $transaction->status,
+          'transaction' => $transaction,
+          'storeName'   => config('app.name', 'Store'),
+        ]);
     }
+
+    // Generic flow for paytabs / paymob / kashier
     $larapay = Larapay::init(gateway: $transaction->gateway);
     $check = $larapay
                 ->set(refrance: $transaction->refrance)
@@ -261,13 +308,13 @@ class LarapayController extends Controller
         $transaction->status = 'success';
         $transaction->response = json_encode($check->json());
         $transaction->save();
-        return view('larapay::gateways.kashier.result', ['status' => 'success', 'transaction' => $transaction]);
+        return view('larapay::gateways.kashier.result', ['status' => 'success', 'transaction' => $transaction, 'storeName' => config('app.name')]);
       }
       if($check->paymentCancelled()){
         $transaction->status = 'cancelled';
         $transaction->response = json_encode($check->json());
         $transaction->save();
-        return view('larapay::gateways.kashier.result', ['status' => 'failed', 'transaction' => $transaction]);
+        return view('larapay::gateways.kashier.result', ['status' => 'failed', 'transaction' => $transaction, 'storeName' => config('app.name')]);
       }
     }else{
       echo $check->getError();

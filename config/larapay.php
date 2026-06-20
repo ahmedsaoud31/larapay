@@ -82,5 +82,28 @@ return [
     ],
 
     // Accepted Gateways
-    'gateways' => ['paypal', 'paytabs', 'paymob', 'kashier'],
+    'gateways' => ['paypal', 'paytabs', 'paymob', 'kashier', 'payfort'],
+
+    'payfort' => [
+        'live' => [
+            'access_code'         => env('PAYFORT_LIVE_ACCESS_CODE', ''),
+            'merchant_identifier' => env('PAYFORT_LIVE_MERCHANT_ID', ''),
+            'sha_request_phrase'  => env('PAYFORT_LIVE_SHA_REQUEST_PHRASE', ''),
+            'sha_response_phrase' => env('PAYFORT_LIVE_SHA_RESPONSE_PHRASE', ''),
+        ],
+        'sandbox' => [
+            'access_code'         => env('PAYFORT_SANDBOX_ACCESS_CODE', ''),
+            'merchant_identifier' => env('PAYFORT_SANDBOX_MERCHANT_ID', ''),
+            'sha_request_phrase'  => env('PAYFORT_SANDBOX_SHA_REQUEST_PHRASE', ''),
+            'sha_response_phrase' => env('PAYFORT_SANDBOX_SHA_RESPONSE_PHRASE', ''),
+        ],
+        // sha256 (recommended) | sha512 | sha1
+        'sha_type' => env('PAYFORT_SHA_TYPE', 'sha256'),
+        // en or ar
+        'language' => env('PAYFORT_LANGUAGE', 'en'),
+        // PURCHASE or AUTHORIZATION
+        'command'  => env('PAYFORT_COMMAND', 'PURCHASE'),
+        // Override the redirect-back URL (null = auto-generated larapay.client-callback)
+        'return_url' => null,
+    ],
 ];

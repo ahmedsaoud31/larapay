@@ -9,6 +9,7 @@ use Larapay\Controllers\LarapayController;
 Route::get('/larapay/paymob', [LarapayController::class, 'paymob'])->name('larapay.paymob');
 Route::get('/larapay/kashier', [LarapayController::class, 'kashier'])->name('larapay.kashier');
 Route::get('/larapay/kashier/form', [LarapayController::class, 'kashierForm'])->name('larapay.kashier-form');
+Route::get('/larapay/payfort', [LarapayController::class, 'payfort'])->name('larapay.payfort');
 Route::get('/larapay/run', [LarapayController::class, 'run'])->name('larapay.run');
 Route::get('/larapay/refund', [LarapayController::class, 'refund'])->name('larapay.refund');
 Route::get('/larapay/check', [LarapayController::class, 'check'])->name('larapay.check');
