@@ -4,6 +4,7 @@ namespace Larapay;
 
 use Larapay\Core\Exceptions\NotSupportedGatewayException;
 use Larapay\Core\Exceptions\NotSupportedModeException;
+use Larapay\Core\Gateways\Kashier;
 use Larapay\Core\Gateways\PayPal;
 use Larapay\Core\Gateways\PayTabs;
 use Larapay\Core\Gateways\PayMob;
@@ -42,6 +43,9 @@ class Larapay
         break;
       case "paymob":
         $this->model =  (new PayMob(gateway: $this->gateway, mode: $this->mode))->init();
+        break;
+      case "kashier":
+        $this->model = (new Kashier(gateway: $this->gateway, mode: $this->mode))->init();
         break;
       default:
         $this->model =  (new PayPal(gateway: $this->gateway, mode: $this->mode))->init();

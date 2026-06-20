@@ -48,8 +48,8 @@ class PayMob extends LarapayBase implements LarapayInterface
     $this->api_key = config("larapay.{$this->gateway}.{$this->mode}.api_key");
     $this->secret_key = config("larapay.{$this->gateway}.{$this->mode}.secret_key");
     $this->public_key = config("larapay.{$this->gateway}.{$this->mode}.public_key");
-    $this->server_callback = ($config = config("larapay.{$this->gateway}.{$this->mode}.server_callback")) ? $config : route("larapay.server-callback", $this->gateway);
-    $this->client_callback = ($config = config("larapay.{$this->gateway}.{$this->mode}.client_callback")) ? $config : route("larapay.client-callback", $this->gateway);
+    $this->server_callback = config("larapay.{$gateway}.server_callback") ?: route('larapay.server-callback', $gateway);
+    $this->client_callback = config("larapay.{$gateway}.client_callback") ?: route('larapay.client-callback', $gateway);
     $this->endpoint = $this->getEndPoint();
     $this->cents = $this->getCents();
     $this->expiration = 5800;

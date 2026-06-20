@@ -58,6 +58,29 @@ return [
         'client_callback' => null,
         // endpoint will created from secret key
     ],
+    'kashier' => [
+        'mid' => env('KASHIER_MID', ''),
+        'live' => [
+            'api_key'    => env('KASHIER_LIVE_API_KEY', ''),
+            'secret_key' => env('KASHIER_LIVE_SECRET_KEY', ''),
+        ],
+        'sandbox' => [
+            'api_key'    => env('KASHIER_SANDBOX_API_KEY', ''),
+            'secret_key' => env('KASHIER_SANDBOX_SECRET_KEY', ''),
+        ],
+        // Redirect URL Kashier sends the customer back to after payment.
+        // Leave null to use the auto-generated larapay.client-callback route.
+        'client_callback' => null,
+        // Webhook URL Kashier POSTs server-side notifications to.
+        // Leave null to use the auto-generated larapay.server-callback route.
+        'server_callback' => null,
+        // Comma-separated list of allowed payment methods.
+        // Options: card, wallet, bank_installments
+        'allowed_methods' => env('KASHIER_ALLOWED_METHODS', 'card,wallet,bank_installments'),
+        // Language for the hosted payment page ('en' or 'ar')
+        'display' => env('KASHIER_DISPLAY', 'en'),
+    ],
+
     // Accepted Gateways
-    'gateways' => ['paypal', 'paytabs', 'paymob'],
+    'gateways' => ['paypal', 'paytabs', 'paymob', 'kashier'],
 ];

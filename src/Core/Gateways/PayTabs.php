@@ -44,8 +44,8 @@ class PayTabs extends LarapayBase implements LarapayInterface
     $this->client_key = config("larapay.{$this->gateway}.{$this->mode}.client_key");
     $this->tran_type = 'sale';
     $this->tran_class = 'ecom';
-    $this->server_callback = ($config = config("larapay.{$this->gateway}.{$this->mode}.server_callback")) ? $config : route("larapay.server-callback", $this->gateway);
-    $this->client_callback = ($config = config("larapay.{$this->gateway}.{$this->mode}.client_callback")) ? $config : route("larapay.client-callback", $this->gateway);
+    $this->server_callback = config("larapay.{$gateway}.server_callback") ?: route('larapay.server-callback', $gateway);
+    $this->client_callback = config("larapay.{$gateway}.client_callback") ?: route('larapay.client-callback', $gateway);
     parent::__construct();
   }
 

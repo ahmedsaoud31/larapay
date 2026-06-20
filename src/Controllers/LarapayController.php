@@ -159,9 +159,75 @@ class LarapayController extends Controller
     }
   }
 
-  public function serverCallback()
+  public function kashier()
   {
-    file_put_contents('r.json', request()->all());
+    $larapay = Larapay::init(gateway: 'kashier');
+    $pay = $larapay
+                  ->billing(
+                    name: 'Ahmed Saoud',
+                    email: 'test@example.com',
+                    phone: '+201000000000',
+                  )
+                  ->cart(
+                    id: uniqid(),
+                    description: 'Test Kashier order',
+                    amount: 100.00,
+                  )
+                  ->pay();
+    if (!$pay->hasError()) {
+      $pay->register();
+      if ($pay->hasRedirect()) {
+        return redirect($pay->getRedirect());
+      }
+    } else {
+      echo $pay->getError();
+    }
+  }
+
+  /**
+   * Kashier Session API — order review + redirect to Kashier hosted payment.
+   *
+   * GET /larapay/kashier/form
+   *   → Creates a payment session via Kashier API
+   *   → Shows an order summary page with a "Pay Now" button
+   *   → Button links directly to Kashier's hosted session URL
+   *   → After payment, Kashier redirects back to larapay.client-callback
+   */
+  public function kashierForm(Request $request)
+  {
+    $larapay = Larapay::init(gateway: 'kashier');
+    $gateway = $larapay
+      ->billing(
+        name:  'Test User',
+        email: 'test@example.com',
+      )
+      ->cart(
+        id:          uniqid(),
+        description: 'Test Kashier API payment',
+        amount:      100.00,
+      )
+      ->createSession();
+
+    if ($gateway->hasError()) {
+      return response(
+        '<pre style="font-family:monospace;padding:20px">'
+        . '<b>Kashier createSession error:</b>' . "\n"
+        . htmlspecialchars($gateway->getError()) . "\n\n"
+        . '<b>Response body:</b>' . "\n"
+        . htmlspecialchars((string) $gateway->responseBody())
+        . '</pre>',
+        500
+      );
+    }
+
+    $gateway->register();
+
+    return $gateway->getPayForm(storeName: config('app.name', 'Demo Store'));
+  }
+
+  public function serverCallback($gatway)
+  {
+    $this->clientCallback($gatway);
   }
 
   public function clientCallback($gatway)
@@ -175,24 +241,37 @@ class LarapayController extends Controller
         $transaction->refrance = request()->id;
         $transaction->save();
         break;
+      case 'kashier':
+        // Kashier sends orderId (which we set to the larapay uid) on the redirect-back URL
+        $transaction = LarapayTransaction::whereUid(request()->merchantOrderId)->firstOrFail();
+        // $transaction->refrance = request()->orderReference;
+        // Store the Kashier transactionId as our refrance
+        if (request()->transactionId) {
+          $transaction->refrance = request()->query('transactionId');
+          $transaction->save();
+        }
+        break;
     }
     $larapay = Larapay::init(gateway: $transaction->gateway);
     $check = $larapay
                 ->set(refrance: $transaction->refrance)
-                ->check();
+                ->check(request()->query());
     if(!$check->hasError()){
       if($check->paymentAccepted()){
         $transaction->status = 'success';
         $transaction->response = json_encode($check->json());
         $transaction->save();
+        return view('larapay::gateways.kashier.result', ['status' => 'success', 'transaction' => $transaction]);
       }
       if($check->paymentCancelled()){
         $transaction->status = 'cancelled';
         $transaction->response = json_encode($check->json());
         $transaction->save();
+        return view('larapay::gateways.kashier.result', ['status' => 'failed', 'transaction' => $transaction]);
       }
     }else{
       echo $check->getError();
     }
   }
+  
 }
