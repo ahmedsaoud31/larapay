@@ -18,6 +18,11 @@ class LarapayServiceProvider extends ServiceProvider
         ], 'larapay-config');
 
         $this->publishes([
+            // Publish JS assets to public/vendor/larapay/
+            __DIR__.'/../resources/js' => public_path('vendor/larapay/js'),
+        ], 'larapay-assets');
+
+        $this->publishes([
 
             // Publish atheer views
             __DIR__.'/../resources/views/vendor/atheer' => resource_path('views/vendor/atheer'),
@@ -32,6 +37,8 @@ class LarapayServiceProvider extends ServiceProvider
 
         $this->loadViewsFrom(__DIR__.'/../resources/views/vendor/larapay', 'larapay');
 
+        $this->loadTranslationsFrom(__DIR__.'/../lang', 'larapay');
+
         $this->loadRoutes();
         $this->loadConfig();
     }
@@ -44,9 +51,12 @@ class LarapayServiceProvider extends ServiceProvider
         //
     }
 
-    private function loadRoutes()
+    private function loadRoutes(): void
     {
-        $this->loadRoutesFrom(__DIR__.'/../routes/larapay.php');
+        \Illuminate\Support\Facades\Route::middleware('web')
+            ->group(function () {
+                $this->loadRoutesFrom(__DIR__.'/../routes/larapay.php');
+            });
     }
 
     private function loadConfig()

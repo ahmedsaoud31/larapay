@@ -23,4 +23,12 @@ class LarapayTransaction extends Model
   {
     return $this->belongsTo(LarapayTransaction::class, 'parent_id');
   }
+
+  /**
+   * Get child refund transactions.
+   */
+  public function children(): \Illuminate\Database\Eloquent\Relations\HasMany
+  {
+    return $this->hasMany(LarapayTransaction::class, 'parent_id');
+  }
 }

@@ -16,6 +16,8 @@ class PayTabs extends LarapayBase implements LarapayInterface
 {   
   use Customer, Shipping, Card, Cart, Billing;
   
+  protected ?LarapayTransaction $transaction = null;
+
   public function __construct(
     protected string $gateway,
     protected string $mode,
@@ -49,7 +51,7 @@ class PayTabs extends LarapayBase implements LarapayInterface
     parent::__construct();
   }
 
-  public function init(): PayTabs
+  public function init(): static
   {
     return $this;
   }
@@ -70,7 +72,8 @@ class PayTabs extends LarapayBase implements LarapayInterface
     ?string $client_callback = null,
     ?string $token = null,
     ?string $refrance = null,
-  ): PayTabs
+    ?LarapayTransaction $transaction = null,
+  ): static
   {
     $this->uid = $uid ?? $this->uid;
     $this->profile_id = $profile_id ?? $this->profile_id;
@@ -87,6 +90,7 @@ class PayTabs extends LarapayBase implements LarapayInterface
     $this->client_callback = $client_callback ?? $this->client_callback;
     $this->token = $token ?? $this->token;
     $this->refrance = $refrance ?? $this->refrance;
+    $this->transaction = $transaction ?? $this->transaction;
     return $this;
   }
 
@@ -96,7 +100,7 @@ class PayTabs extends LarapayBase implements LarapayInterface
     ?string $description = null,
     ?string $currency = null,
     ?string $amount = null,
-  ): PayTabs
+  ): static
   {
     $this->cart_id = $id ?? $this->cart_id;
     $this->cart_description = $description ?? $this->cart_description;
@@ -106,7 +110,7 @@ class PayTabs extends LarapayBase implements LarapayInterface
   }
 
   # Run payment
-  public function pay($amount = null): PayTabs
+  public function pay($amount = null): static
   {
     if($this->hasError()) return $this;
     $this->amount = $amount ?? $this->amount;
@@ -117,15 +121,14 @@ class PayTabs extends LarapayBase implements LarapayInterface
     }
     # Set redirect if exists
     if($this->response->successful()){
-      if(isset($this->response->json()['redirect_url']) && $this->response->json()['redirect_url']){
-        $this->redirect = $this->response->json()['redirect_url'];
-      }
+      $this->redirect = $this->response->json()['redirect_url'] ?? null;
+      $this->register();
     }
     return $this;
   }
 
   # Refund payment
-  public function refund($amount = null): PayTabs
+  public function refund($amount = null): static
   {
     $this->tran_type = 'refund';
     if($this->hasError()) return $this;
@@ -135,19 +138,18 @@ class PayTabs extends LarapayBase implements LarapayInterface
   }
 
   # Check payment
-  public function check(): PayTabs
+  public function check(): static
   {
-    if(!$this->refrance && !$this->cart_id){
-      $this->error = __('Please provide us with Refrance ID or Cart ID');
-    }
     if($this->hasError()) return $this;
     $this->post($this->getEndPoint('payment/query'), $this->getPostCheckFormData(), $this->getHeaders());
+    $this->updateTransaction();
     return $this;
   }
 
-  # Check payment
+  # get pay form
   public function getPayForm(): View
   {
+    $this->register();
     return view('larapay::gateways.paytabs.form', ['clientKey' => $this->getClientKey()]);
   }
 
@@ -177,15 +179,15 @@ class PayTabs extends LarapayBase implements LarapayInterface
 
   private function getPostCheckFormData(): array
   {
-    if($this->refrance){
+    if($this->transaction->refrance){
       return [
         "profile_id" => $this->profile_id,
-        "tran_ref" => $this->refrance,
+        "tran_ref" => $this->transaction->refrance,
       ];
     }else{
       return [
         "profile_id" => $this->profile_id,
-        "cart_id" => $this->cart_id,
+        "cart_id" => $this->transaction->uid,
       ];
     }
   }
@@ -194,7 +196,7 @@ class PayTabs extends LarapayBase implements LarapayInterface
   {
     return array_merge($this->getPostData(), [
       "profile_id" => $this->profile_id,
-      "tran_ref" => $this->refrance,
+      "tran_ref" => $this->transaction->refrance,
     ]);
   }
 
@@ -237,35 +239,42 @@ class PayTabs extends LarapayBase implements LarapayInterface
 
   public function paymentAccepted() : bool
   {
-    if(isset($this->json()->payment_result->response_status) && $this->json()->payment_result->response_status == 'A'){
-      return true;
-    }else{
-      return false;
-    }
+    $status = $this->json()->payment_result->response_status ?? null;
+    if($status == 'A') return true;
+    return false;
   }
 
   public function paymentCancelled() : bool
   {
-    if(isset($this->json()->payment_result->response_status) && $this->json()->payment_result->response_status == 'C'){
-      return true;
-    }else{
-      return false;
-    }
+    $status = $this->json()->payment_result->response_status ?? null;
+    if($status == 'C') return true;
+    return false;
   }
 
   public function register() : void
   {
-    $data = $this->json();
+    $data = $this->json() ?? null;
     $transaction = new LarapayTransaction;
-    $transaction->type = strtolower($data->tran_type);
+    $transaction->type = strtolower($data->tran_type) ?? 'sale';
     $transaction->uid = $this->uid;
     $transaction->gateway = $this->gateway;
     $transaction->refrance = $data->tran_ref ?? null;
-    $transaction->amount = $data->cart_amount ?? 0;
-    $transaction->currency = $data->cart_currency ?? null;
+    $transaction->amount = (float) $this->amount ?? 0;
+    $transaction->currency = $this->currency ?? null;
     $transaction->response = json_encode($data);
     $transaction->status = 'pending';
     $transaction->save();
+  }
+
+  private function updateTransaction(): void
+  {
+      if($this->paymentAccepted()){
+          $this->transaction->status = 'success';
+      }else{
+          $this->transaction->status = 'cancelled';
+      }
+      $this->transaction->response = json_encode($this->json());
+      $this->transaction->save();
   }
 
   public function registerRefund($parentTransaction) : void

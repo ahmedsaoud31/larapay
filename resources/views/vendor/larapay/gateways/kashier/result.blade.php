@@ -7,15 +7,15 @@
 @section('card-title')
   @if($status === 'success')
     <i class="ti ti-circle-check text-success me-1"></i> Payment Successful
-  @elseif($status === 'failed')
-    <i class="ti ti-circle-x text-danger me-1"></i> Payment Failed
+  @elseif($status === 'cancelled')
+    <i class="ti ti-circle-x text-danger me-1"></i> Payment Cancelled
   @else
     <i class="ti ti-clock-pause text-warning me-1"></i> Payment Pending
   @endif
 @endsection
 
 @section('card-badge')
-  <span class="badge bg-{{ $status === 'success' ? 'success' : ($status === 'failed' ? 'danger' : 'warning') }} text-uppercase">
+  <span class="badge bg-{{ $status === 'success' ? 'success' : ($status === 'cancelled' ? 'danger' : 'warning') }} text-uppercase">
     {{ ucfirst($status) }}
   </span>
 @endsection
@@ -32,7 +32,7 @@
     <h2 class="mb-1">Payment Successful</h2>
     <p class="text-muted mb-4">Your payment has been processed successfully.</p>
 
-  @elseif($status === 'failed')
+  @elseif($status === 'cancelled')
     <span class="avatar avatar-xl bg-danger-lt mb-4">
       <i class="ti ti-circle-x" style="font-size:2.5rem;color:#d63939;"></i>
     </span>
@@ -61,7 +61,7 @@
     <div class="col-6 fw-semibold text-end text-capitalize">{{ $transaction->gateway }}</div>
 
     <div class="col-6 text-muted small text-uppercase fw-medium">Status</div>
-    <div class="col-6 fw-semibold text-end text-{{ $status === 'success' ? 'success' : ($status === 'failed' ? 'danger' : 'warning') }}">
+    <div class="col-6 fw-semibold text-end text-{{ $status === 'success' ? 'success' : ($status === 'cancelled' ? 'danger' : 'warning') }}">
       {{ ucfirst($transaction->status) }}
     </div>
   </div>

@@ -13,32 +13,42 @@ trait HTTPRequest
   protected Response $response;
   protected ?string $redirect = null;
 
-  public function post($url, $postData = [], $headers = [], $options = []): void
+  public function post($url, $data = [], $headers = [], $options = []): void
   {
     try{
       $this->response = Http::withHeaders($headers)
                               ->withOptions($options)
-                              ->post($url, $postData);
+                              ->post($url, $data);
     }catch(Exception $e){
-      throw new GatewayConnectionException($this->gateway);
+      $ex = new GatewayConnectionException($this->gateway);
+      $this->error = $ex->msg;
+      throw $ex;
     }
-    
-    if(!$this->response->successful()){
-      $this->handleErrors();
-    }
+    $this->handleErrors();
   }
 
-  public function get($url, $postData = [], $headers = [], $options = []): void
+  public function get($url, $data = [], $headers = [], $options = []): void
   {
     try{
-      $this->response = Http::withHeaders($headers)->get($url, $postData);
+      $this->response = Http::withHeaders($headers)->get($url, $data);
     }catch(Exception $e){
-      throw new GatewayConnectionException($this->gateway);
+      $ex = new GatewayConnectionException($this->gateway);
+      $this->error = $ex->msg;
+      throw $ex;
     }
-    
-    if(!$this->response->successful()){
-      $this->handleErrors();
+    $this->handleErrors();
+  }
+
+  public function put($url, $data = [], $headers = [], $options = []): void
+  {
+    try{
+      $this->response = Http::withHeaders($headers)->put($url, $data);
+    }catch(Exception $e){
+      $ex = new GatewayConnectionException($this->gateway);
+      $this->error = $ex->msg;
+      throw $ex;
     }
+    $this->handleErrors();
   }
 
   public function response(): Response
@@ -48,10 +58,11 @@ trait HTTPRequest
   
   public function json(): object | null
   {
-    if(is_array($this->response->object()) > 0){
-      return $this->response->object()[0];
+    $json = $this->response->object();
+    if(is_array($json) > 0){
+      return $json[0];
     }
-    return $this->response->object();
+    return $json;
   }
 
   public function hasRedirect(): bool

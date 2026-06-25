@@ -23,16 +23,26 @@ trait Errors
 
   private function handleErrors() : void
   {
-    $this->error = $this->json()->message ?? false;
-    if($this->json()){
-      foreach($this->json() as $key => $value){
-        if(isset($value[0])){
-          $this->errors[] = "{$key}: {$value[0]}";
+    if(!$this->response->successful()){
+      $this->error = $this->json()->message ?? false;
+      if($this->json()){
+        foreach($this->json() as $key => $value){
+          if(is_array($value) && isset($value[0])){
+            $this->errors[] = "{$key}: {$value[0]}";
+          }
+          if(is_object($value) && isset($value->cause)){
+            $this->errors[] = "{$value->cause}";
+          }
         }
       }
-    }
-    if(!$this->hasError()){
-      $this->error = __('Uknown error');
+      if($this->response->status() != 200){
+        $this->error = __("{$this->response->status()}: {$this->response->reason()}");
+      }
+      if(!$this->hasError()){
+        $this->error = __('Uknown error');
+      }
+    } else if($this->response->status() != 200){
+      $this->error = __("{$this->response->status()}: {$this->response->reason()}");
     }
   }
 }

@@ -6,6 +6,11 @@ use Larapay\Controllers\LarapayController;
 
 
 //Route::resource('larapay', LarapayController::class);
+Route::get('/larapay', [LarapayController::class, 'landing'])->name('larapay.landing');
+Route::get('/larapay/lang/{locale}', [LarapayController::class, 'setLocale'])->name('larapay.lang');
+Route::post('/larapay/refund-action', [LarapayController::class, 'refundAction'])->name('larapay.refund-action');
+Route::post('/larapay/check-action', [LarapayController::class, 'checkAction'])->name('larapay.check-action');
+Route::post('/larapay/test-pay', [LarapayController::class, 'testPay'])->name('larapay.test-pay');
 Route::get('/larapay/paymob', [LarapayController::class, 'paymob'])->name('larapay.paymob');
 Route::get('/larapay/kashier', [LarapayController::class, 'kashier'])->name('larapay.kashier');
 Route::get('/larapay/kashier/form', [LarapayController::class, 'kashierForm'])->name('larapay.kashier-form');

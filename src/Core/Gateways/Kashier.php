@@ -45,26 +45,32 @@ class Kashier extends LarapayBase implements LarapayInterface
     protected const API_LIVE = 'https://api.kashier.io';
     protected const API_TEST = 'https://test-api.kashier.io';
 
+    // Refund endpoints (different subdomain from session API)
+    protected const REFUND_LIVE = 'https://fep.kashier.io';
+    protected const REFUND_TEST = 'https://test-fep.kashier.io';
+
+    protected ?string $mid             = null;
+    protected ?string $api_key         = null;
+    protected ?string $secret_key      = null;
+    protected ?string $endpoint        = null;
+    protected ?float  $amount          = null;
+    protected ?string $currency        = null;
+    protected ?string $server_callback = null;
+    protected ?string $client_callback = null;
+    protected ?string $refrance        = null;
+    protected ?string $allowed_methods = null;
+    protected ?string $display         = null;
+    protected ?LarapayTransaction  $transaction         = null;
+    protected ?string  $reason         = null;
+
     protected ?string $session_id          = null;
     protected ?string $session_url         = null;
     protected array   $callbackData        = [];
     protected array   $allowed_methods_arr = [];
+    protected array $acceptedSuccessStatus = ['SUCCESS', 'PAID', 'CAPTURED'];
 
-    public function __construct(
-        protected string  $gateway,
-        protected string  $mode,
-        protected ?string $mid             = null,
-        protected ?string $api_key         = null,
-        protected ?string $secret_key      = null,
-        protected ?string $endpoint        = null,
-        protected ?float  $amount          = null,
-        protected ?string $currency        = null,
-        protected ?string $server_callback = null,
-        protected ?string $client_callback = null,
-        protected ?string $refrance        = null,
-        protected ?string $allowed_methods = null,
-        protected ?string $display         = null,
-    ) {
+    public function __construct( protected string  $gateway, protected string  $mode)
+    {
         $this->mid             = config("larapay.{$gateway}.mid");
         $this->api_key         = config("larapay.{$gateway}.{$mode}.api_key");
         $this->secret_key      = config("larapay.{$gateway}.{$mode}.secret_key");
@@ -86,16 +92,18 @@ class Kashier extends LarapayBase implements LarapayInterface
     public function init(): static { return $this; }
 
     public function set(
-        ?string $uid              = null,
-        ?string $currency         = null,
-        ?float  $amount           = null,
-        mixed   $cart_id          = null,
-        ?string $cart_description = null,
-        ?string $server_callback  = null,
-        ?string $client_callback  = null,
-        ?string $refrance         = null,
-        ?string $allowed_methods  = null,
-        ?string $display          = null,
+        ?string $uid                        = null,
+        ?string $currency                   = null,
+        ?float  $amount                     = null,
+        mixed   $cart_id                    = null,
+        ?string $cart_description           = null,
+        ?string $server_callback            = null,
+        ?string $client_callback            = null,
+        ?string $refrance                   = null,
+        ?string $allowed_methods            = null,
+        ?string $display                    = null,
+        ?LarapayTransaction $transaction    = null,
+        ?string $reason                     = null,
     ): static {
         $this->uid              = $uid              ?? $this->uid;
         $this->currency         = $currency         ? Str::upper($currency) : $this->currency;
@@ -107,6 +115,8 @@ class Kashier extends LarapayBase implements LarapayInterface
         $this->refrance         = $refrance         ?? $this->refrance;
         $this->allowed_methods  = $allowed_methods  ?? $this->allowed_methods;
         $this->display          = $display          ?? $this->display;
+        $this->transaction      = $transaction      ?? $this->transaction;
+        $this->reason           = $reason           ?? $this->reason;
         return $this;
     }
 
@@ -297,6 +307,135 @@ class Kashier extends LarapayBase implements LarapayInterface
         return $this;
     }
 
+    /**
+     * GET /v2/aggregator/transactions/{transactionID}
+     */
+    public function check(): static
+    {
+        if ($this->hasError()) return $this;
+
+        if (!$this->transaction) {
+            $this->error = __('Set transaction before check it.');
+            return $this;
+        }
+
+        if (!$this->transaction->refrance) {
+            return $this->checkByOrderID();
+        }
+
+        return $this->runCheck();
+    }
+
+    private function runCheck(): static
+    {
+        $this->get(
+            $this->apiBase() . "/v2/aggregator/transactions/{$this->transaction->refrance}",
+            [],
+            ['Authorization' => $this->secret_key]
+        );
+        //$this->callbackData = (array) ($this->json() ?? []);
+        $this->updateTransaction();
+        return $this;
+    }
+
+    /**
+     * GET /v2/aggregator/transactions?search=orderID
+     */
+    public function checkByOrderID(): static
+    {
+        $this->get(
+            $this->apiBase() . "/v2/aggregator/transactions",
+            ['search' => $this->transaction->uid],
+            ['Authorization' => $this->secret_key]
+        );
+        $json = $this->json()->body[0] ?? false;
+        if(!$json || $json->merchantOrderId != $this->transaction->uid){
+            $this->error = __('Transaction not found.');
+            return $this;
+        }
+        $this->transaction->refrance = $json->transactionId;
+        $this->transaction->save();
+        return $this->runCheck();
+    }
+
+    /**
+     * Update transaction in database after check it from gatway
+     */
+    private function updateTransaction(): void
+    {
+        $status = $this->json()->body->paymentStatus ?? false;
+        if($status && $this->paymentAccepted()){
+            $this->transaction->status = 'success';
+        }else{
+            $this->transaction->status = 'cancelled';
+        }
+        $this->transaction->response = json_encode($this->json());
+        $this->transaction->save();
+    }
+
+    // =========================================================================
+    // Mode C — Refund
+    // =========================================================================
+
+    /**
+     * Refund a Kashier transaction (full or partial).
+     *
+     * PUT /v3/orders/{orderId}
+     *
+     * @param  float        $amount  Amount to refund (decimal, e.g. 50.00)
+     * @param  string|null  $reason  Optional reason shown in Kashier dashboard
+     *
+     * Requires the transaction's uid (the orderId sent to Kashier) to be set
+     * via ->set(uid: $transaction->uid) or ->set(refrance: $transaction->uid).
+     */
+    public function refund(?float $amount = null, ?string $reason = null): static
+    {
+        $this->amount = $amount ?? $this->amount;
+        $this->reason = $reason ?? $this->reason;
+        
+        if ($this->hasError()) return $this;
+
+        if (! $this->secret_key) {
+            $this->error = __('Kashier Secret key is required for refunds.');
+            return $this;
+        }
+        if (! $this->amount || $this->amount <= 0) {
+            $this->error = __('A positive refund amount is required.');
+            return $this;
+        }
+
+        // orderId in the URL = the uid we originally sent to Kashier as the order reference
+        $orderId =  $this->transaction->uid ?? $this->transaction->refrance;
+
+        if (! $orderId) {
+            $this->error = __('Kashier orderId (uid) is required for refunds.');
+            return $this;
+        }
+
+        $url  = $this->refundBase() . "/v3/orders/{$orderId}";
+        $body = [
+            'apiOperation' => 'REFUND',
+            'reason'       => $this->reason ?? 'Customer refund request',
+            'transaction'  => [
+                'amount' => $this->amount,
+            ],
+        ];
+
+        $this->put($url, $body, [
+            'Authorization' => $this->secret_key,
+            'Content-Type'  => 'application/json',
+            'accept'        => 'application/json',
+        ]);
+
+        if (! $this->hasError()) {
+            $json = $this->json();
+            $this->callbackData = (array) ($json ?? []);
+            $this->registerRefund();
+        }
+
+        return $this;
+    }
+
     // =========================================================================
     // HPP callback signature verification (Mode A redirect return)
     // =========================================================================
@@ -305,7 +444,7 @@ class Kashier extends LarapayBase implements LarapayInterface
      * Verify the HMAC Kashier appends to the redirect-back URL.
      * All query params except "signature" and "mode" are signed.
      */
-    public function check(?array $queryParams = null): static
+    public function check2(?array $queryParams = null): static
     {
         if ($this->hasError()) return $this;
 
@@ -343,14 +482,24 @@ class Kashier extends LarapayBase implements LarapayInterface
 
     public function paymentAccepted(): bool
     {
-        $status = $this->callbackData['paymentStatus'] ?? $this->callbackData['status'] ?? null;
-        return in_array(strtoupper((string) $status), ['SUCCESS', 'PAID', 'CAPTURED']);
+        $status = $this->json()->body->paymentStatus ?? 'UNKNOWN';
+        return in_array(strtoupper((string) $status), $this->acceptedSuccessStatus);
     }
 
     public function paymentCancelled(): bool
     {
-        $status = $this->callbackData['paymentStatus'] ?? $this->callbackData['status'] ?? null;
+        $status = $this->callbackData['paymentStatus'] ?? $this->callbackData['status'] ?? $this->json()->body->status ?? null;
         return in_array(strtoupper((string) $status), ['CANCELLED', 'CANCEL', 'FAILED', 'FAILURE', 'DECLINED']);
+    }
+
+    /**
+     * Check if the refund was successful.
+     * Refund response uses top-level "status": "SUCCESS".
+     */
+    public function refundAccepted(): bool
+    {
+        $status = $this->json()->response->result ?? 'UNKNOWN';
+        return strtoupper((string) $status) === 'SUCCESS';
     }
 
     public function hasTocken(): bool        { return false; }
@@ -371,28 +520,32 @@ class Kashier extends LarapayBase implements LarapayInterface
     {
         $tx           = new LarapayTransaction;
         $tx->type     = 'sale';
-        $tx->uid      = $this->uid;
+        $tx->uid      = $this->cart_id ?? $this->uid;
         $tx->gateway  = $this->gateway;
         $tx->refrance = $this->refrance ?? null;
         $tx->amount   = $this->amount   ?? 0;
         $tx->currency = $this->currency ?? null;
-        $tx->response = json_encode($this->callbackData ?: ['session_id' => $this->session_id]);
+        $tx->response = json_encode($this->callbackData ?? null);
         $tx->status   = 'pending';
         $tx->save();
     }
 
-    public function registerRefund($parentTransaction): void
+    public function registerRefund(): void
     {
+        if(!$this->transaction){
+            $this->error = __('Set transaction before make a refund.');
+            return;
+        }
         $tx            = new LarapayTransaction;
         $tx->type      = 'refund';
-        $tx->uid       = uniqid();
+        $tx->uid       = $this->json()->response->transactionId ?? uniqid();
         $tx->gateway   = $this->gateway;
-        $tx->refrance  = $this->refrance ?? null;
+        $tx->refrance  = $this->json()->response->transactionId ?? null;
         $tx->amount    = $this->amount   ?? 0;
-        $tx->currency  = $this->currency ?? null;
+        $tx->currency  = $this->transaction->currency ?? null;
         $tx->response  = json_encode($this->callbackData ?? []);
         $tx->status    = 'success';
-        $tx->parent_id = $parentTransaction->id;
+        $tx->parent_id = $this->transaction->id;
 
         if (! LarapayTransaction::where('refrance', $tx->refrance)
                                  ->where('gateway',  $tx->gateway)->first()) {
@@ -425,6 +578,11 @@ class Kashier extends LarapayBase implements LarapayInterface
     protected function apiBase(): string
     {
         return $this->mode === 'live' ? self::API_LIVE : self::API_TEST;
+    }
+
+    protected function refundBase(): string
+    {
+        return $this->mode === 'live' ? self::REFUND_LIVE : self::REFUND_TEST;
     }
 
     protected function modeParam(): string

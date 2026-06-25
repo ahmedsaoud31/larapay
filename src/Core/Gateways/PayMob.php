@@ -8,7 +8,6 @@ use Illuminate\Support\Str;
 use Larapay\Core\LarapayBase;
 
 use Larapay\Core\LarapayInterface;
-use Illuminate\Support\Facades\Http;
 use Larapay\Models\LarapayTransaction;
 use Larapay\Core\Gateways\PayMob\Traits\Billing;
 
@@ -141,7 +140,6 @@ class PayMob extends LarapayBase implements LarapayInterface
   public function requestToken(): PayMob
   {
     if($this->hasError()) return $this;
-    $this->amount = $amount ?? $this->amount;
     $this->post($this->getEndPoint('api/auth/tokens'), $this->getPostTockenData(), $this->getHeaders());
     $this->token = $this->json()->token ?? null;
     if(!$this->token){
@@ -281,18 +279,17 @@ class PayMob extends LarapayBase implements LarapayInterface
   {
     if(isset($this->json()->success) && $this->json()->success){
       return true;
-    }else{
-      return false;
     }
+    return false;
   }
 
   public function paymentCancelled() : bool
   {
+    // Cancelled when success is explicitly false or missing
     if(isset($this->json()->success) && $this->json()->success){
       return false;
-    }else{
-      return true;
     }
+    return true;
   }
 
   public function register() : void

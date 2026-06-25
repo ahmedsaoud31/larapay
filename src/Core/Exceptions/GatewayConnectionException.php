@@ -6,8 +6,11 @@ use Exception;
 
 class GatewayConnectionException extends Exception
 {
+    public ?string $msg = null;
+
     public function __construct($gateway)
     {
-      parent::__construct(__("Connecting to {$gateway} gateway faild"));
+      $this->msg = __("Connecting to {$gateway} gateway faild");
+      parent::__construct($this->msg);
     }
 }

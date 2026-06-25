@@ -6,8 +6,11 @@ use Exception;
 
 class NotSupportedGatewayException extends Exception
 {
+    public ?string $msg = null;
+    
     public function __construct($gateway)
     {
-      parent::__construct(__("{$gateway} gateway not supported yet, use one of this list (". implode(', ', config('larapay.gateways')) .")"));
+      $this->msg = __("{$gateway} gateway not supported yet, use one of this list (". implode(', ', config('larapay.gateways')) .")");
+      parent::__construct($this->msg);
     }
 }
