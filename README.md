@@ -17,7 +17,8 @@ A Laravel payment gateway package that provides a unified, fluent API for multip
 | [PayMob](https://paymob.com) | Egypt / MENA | Hosted checkout (unified) |
 | [Kashier](https://kashier.io) | Egypt | HPP redirect / Session API |
 | [Payfort (Amazon Payment Services)](https://paymentservices.amazon.com) | MENA | Hosted checkout |
-| [PayPal](https://paypal.com) | Global | *(stub — not yet implemented)* |
+| [PayPal](https://paypal.com) | Global | Hosted checkout / API |
+| [Tab Travel](https://www.tab.travel) | Global | Hosted checkout / API |
 
 ---
 
@@ -35,11 +36,13 @@ A Laravel payment gateway package that provides a unified, fluent API for multip
 composer require ahmedsaoud31/larapay
 ```
 
-Publish the config file:
+Publish all package files (config, assets, migrations, views, lang):
 
 ```bash
-php artisan vendor:publish --tag=larapay-config
+php artisan vendor:publish --tag=larapay
 ```
+
+*(You can also publish specific parts using `--tag=larapay-config`, `--tag=larapay-migrations`, etc.)*
 
 Run migrations (creates the `larapay_transactions` table):
 
@@ -252,6 +255,75 @@ Larapay::init(gateway: 'payfort')
 
 **Signature algorithm:**
 Params sorted alphabetically → concatenated as `key=value` → wrapped with SHA phrase → SHA-256 hash. Fully implemented — no manual calculation needed.
+
+---
+
+### PayPal
+
+Uses the `srmklive/paypal` package under the hood, wrapped in Larapay's fluent API.
+
+```env
+PAYPAL_MODE=sandbox
+PAYPAL_SANDBOX_CLIENT_ID=
+PAYPAL_SANDBOX_CLIENT_SECRET=
+```
+
+**Usage:**
+
+```php
+$pay = Larapay::init('paypal')
+    ->cart(id: $order->id, description: 'Order #'.$order->id, amount: 100.00)
+    ->pay();
+
+if (!$pay->hasError()) {
+    $pay->register();
+    return redirect()->away($pay->getRedirect());
+}
+```
+
+**Callback verification:**
+
+```php
+$check = Larapay::init('paypal')->check2(request()->query());
+
+if ($check->paymentAccepted()) {
+    $transaction->status = 'success';
+}
+```
+
+---
+
+### Tab Travel
+
+```env
+TAB_API_KEY=
+TAB_CURRENCY=USD
+TAB_MERCHANT_CODE=
+```
+
+**Usage:**
+
+```php
+$pay = Larapay::init('tab')
+    ->billing(name: 'Ahmed Ali', email: 'ahmed@example.com')
+    ->cart(id: $order->id, description: 'Order #'.$order->id, amount: 200.00)
+    ->pay();
+
+if (!$pay->hasError()) {
+    $pay->register();
+    return redirect()->away($pay->getRedirect());
+}
+```
+
+**Callback verification:**
+
+```php
+$check = Larapay::init('tab')->check2(request()->query());
+
+if ($check->paymentAccepted()) {
+    $transaction->status = 'success';
+}
+```
 
 ---
 

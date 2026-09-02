@@ -15,29 +15,34 @@ class LarapayServiceProvider extends ServiceProvider
         $this->publishes([
             // Publish larapay config
             __DIR__.'/../config/larapay.php' => config_path('larapay.php'),
-        ], 'larapay-config');
+        ], ['larapay-config', 'larapay']);
 
         $this->publishes([
             // Publish JS assets to public/vendor/larapay/
             __DIR__.'/../resources/js' => public_path('vendor/larapay/js'),
-        ], 'larapay-assets');
+        ], ['larapay-assets', 'larapay']);
 
         $this->publishes([
+            // Publish larapay migrations
+            __DIR__.'/../database/migrations' => database_path('migrations'),
+        ], ['larapay-migrations', 'larapay']);
 
+        $this->publishes([
             // Publish atheer views
-            __DIR__.'/../resources/views/vendor/atheer' => resource_path('views/vendor/atheer'),
+            __DIR__.'/../resources/views/vendor/larapay' => resource_path('views/vendor/larapay'),
             
             // Publish atheer lang
             __DIR__.'/../lang' => base_path('lang'),
 
             // Publish atheer routes
             __DIR__.'/../routes' => base_path('routes'),
-
-        ]);
+        ], 'larapay');
 
         $this->loadViewsFrom(__DIR__.'/../resources/views/vendor/larapay', 'larapay');
 
         $this->loadTranslationsFrom(__DIR__.'/../lang', 'larapay');
+
+        $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
 
         $this->loadRoutes();
         $this->loadConfig();

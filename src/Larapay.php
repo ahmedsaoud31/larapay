@@ -9,6 +9,7 @@ use Larapay\Core\Gateways\Payfort;
 use Larapay\Core\Gateways\PayPal;
 use Larapay\Core\Gateways\PayTabs;
 use Larapay\Core\Gateways\PayMob;
+use Larapay\Core\Gateways\Tab;
 
 
 class Larapay
@@ -50,6 +51,9 @@ class Larapay
         break;
       case "payfort":
         $this->model = (new Payfort(gateway: $this->gateway, mode: $this->mode))->init();
+        break;
+      case "tab":
+        $this->model = (new Tab(gateway: $this->gateway, mode: $this->mode))->init();
         break;
       default:
         $this->model =  (new PayPal(gateway: $this->gateway, mode: $this->mode))->init();

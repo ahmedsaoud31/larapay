@@ -82,7 +82,7 @@ return [
     ],
 
     // Accepted Gateways
-    'gateways' => ['paypal', 'paytabs', 'paymob', 'kashier', 'payfort'],
+    'gateways' => ['paypal', 'paytabs', 'paymob', 'kashier', 'payfort', 'tab'],
 
     'payfort' => [
         'live' => [
@@ -105,5 +105,20 @@ return [
         'command'  => env('PAYFORT_COMMAND', 'PURCHASE'),
         // Override the redirect-back URL (null = auto-generated larapay.client-callback)
         'return_url' => null,
+    ],
+    'tab' => [
+        'mode' => env('TAB_MODE', 'live'),
+        'merchant_id' => env('TAB_MERCHANT_ID', ''),
+        'live' => [
+            'api_key'    => env('TAB_LIVE_API_KEY', ''),
+            'public_key' => env('TAB_LIVE_PUBLIC_KEY', ''),
+        ],
+        'sandbox' => [
+            'api_key'    => env('TAB_SANDBOX_API_KEY', ''),
+            'public_key' => env('TAB_SANDBOX_PUBLIC_KEY', ''),
+        ],
+        'custom_checkout_url' => env('TAB_CUSTOM_CHECKOUT_URL', ''),
+        'server_callback' => null,
+        'client_callback' => null,
     ],
 ];
