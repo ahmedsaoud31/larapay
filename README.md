@@ -5,7 +5,7 @@
 [![PHP](https://img.shields.io/badge/PHP-%3E%3D8.0-blue)](https://www.php.net)
 [![Laravel](https://img.shields.io/badge/Laravel-%3E%3D10.0-red)](https://laravel.com)
 
-A Laravel payment gateway package that provides a unified, fluent API for multiple payment providers in the Middle East and globally.
+A Laravel payment gateway package that provides a unified, fluent API for multiple payment providers in the Middle East and globally. It features a robust Enterprise-Ready architecture using the **Manager Pattern**, **Events**, **Exceptions**, and **Debug Logging**.
 
 ---
 
@@ -54,13 +54,37 @@ php artisan migrate
 
 ## Configuration
 
-All settings live in `config/larapay.php`. Set your active gateway and mode in `.env`:
+All settings live in `config/larapay.php`. You can configure routes, middlewares, debug mode, and active gateways.
 
 ```env
 LARAPAY_MODE=sandbox        # sandbox or live
 LARAPAY_GATEWAY=paytabs     # default gateway
 LARAPAY_CURRENCY=EGP        # default currency
+LARAPAY_DEBUG=true          # log API requests/responses
 ```
+
+**Customizing Routes:**
+Inside `config/larapay.php`, you can customize the callback routes prefix and middleware:
+```php
+'routes' => [
+    'prefix' => 'larapay',
+    'middleware' => ['web'],
+],
+```
+
+---
+
+## Events & Exceptions
+
+**Events:** 
+The package fires native Laravel events that you can listen to in your `EventServiceProvider`:
+- `Larapay\Events\PaymentSucceeded`
+- `Larapay\Events\PaymentFailed`
+- `Larapay\Events\PaymentRefunded`
+
+**Exceptions:** 
+- `Larapay\Core\Exceptions\GatewayConfigurationException`: Thrown when a gateway's required configuration keys are missing.
+- `Larapay\Core\Exceptions\PaymentGatewayException`: Thrown when a gateway returns an unrecoverable error during initialization.
 
 ---
 
@@ -78,7 +102,10 @@ PAYTABS_END_POINT=https://secure-egypt.paytabs.com/
 **Usage:**
 
 ```php
-$pay = Larapay::init(gateway: 'paytabs')
+use Larapay\Facades\Larapay;
+
+$pay = Larapay::driver('paytabs') // or Larapay::init('paytabs')
+
     ->billing(
         name: 'Ahmed Ali',
         email: 'ahmed@example.com',
@@ -99,7 +126,7 @@ echo $pay->getError();
 **Check transaction:**
 
 ```php
-$check = Larapay::init(gateway: 'paytabs')
+$check = Larapay::driver('paytabs')
     ->set(refrance: $transaction->refrance)
     ->check();
 
@@ -111,7 +138,7 @@ if ($check->paymentAccepted()) {
 **Refund:**
 
 ```php
-Larapay::init(gateway: 'paytabs')
+Larapay::driver('paytabs')
     ->set(refrance: $transaction->refrance)
     ->cart(id: $response->cart_id, description: $response->cart_description, amount: $response->cart_amount)
     ->refund(50.00);
@@ -130,7 +157,7 @@ PAYMOB_SANDBOX_PUBLIC_KEY=
 **Usage:**
 
 ```php
-$pay = Larapay::init(gateway: 'paymob')
+$pay = Larapay::driver('paymob')
     ->billing(
         first_name: 'Ahmed',
         last_name: 'Ali',
@@ -161,7 +188,7 @@ KASHIER_SANDBOX_SECRET_KEY=
 ```
 
 ```php
-$pay = Larapay::init(gateway: 'kashier')
+$pay = Larapay::driver('kashier')
     ->billing(name: 'Ahmed Ali', email: 'ahmed@example.com')
     ->cart(id: $order->id, description: 'Order #'.$order->id, amount: 150.00)
     ->pay();
@@ -175,7 +202,7 @@ if (!$pay->hasError()) {
 **B) Session API** — create a session server-side then show an order-review page that links to Kashier's hosted session URL.
 
 ```php
-$gateway = Larapay::init(gateway: 'kashier')
+$gateway = Larapay::driver('kashier')
     ->billing(email: 'ahmed@example.com')
     ->cart(id: $order->id, description: 'Order #'.$order->id, amount: 150.00)
     ->createSession();
@@ -191,7 +218,7 @@ return $gateway->getPayForm(storeName: 'My Shop');
 **Callback verification** (in `clientCallback`):
 
 ```php
-$check = Larapay::init(gateway: 'kashier')
+$check = Larapay::driver('kashier')
     ->check(request()->query());
 
 if ($check->paymentAccepted()) {
@@ -202,7 +229,7 @@ if ($check->paymentAccepted()) {
 **Optional:** Restrict payment methods:
 
 ```php
-Larapay::init(gateway: 'kashier')->enableCard()->enableWallet()-> ...
+Larapay::driver('kashier')->enableCard()->enableWallet()-> ...
 ```
 
 ---
@@ -220,7 +247,7 @@ PAYFORT_CURRENCY=AED          # must match your APS account currency
 **Usage:**
 
 ```php
-$pay = Larapay::init(gateway: 'payfort')
+$pay = Larapay::driver('payfort')
     ->billing(
         email: 'ahmed@example.com',
         name:  'Ahmed Ali',
@@ -240,7 +267,7 @@ The `getPayForm()` view auto-submits a hidden form to the APS hosted checkout pa
 **Check status:**
 
 ```php
-$check = Larapay::init(gateway: 'payfort')
+$check = Larapay::driver('payfort')
     ->set(refrance: $transaction->refrance)
     ->check();
 ```
@@ -248,7 +275,7 @@ $check = Larapay::init(gateway: 'payfort')
 **Refund:**
 
 ```php
-Larapay::init(gateway: 'payfort')
+Larapay::driver('payfort')
     ->set(refrance: $transaction->fort_id, currency: 'AED')
     ->refund(50.00);
 ```
@@ -271,7 +298,7 @@ PAYPAL_SANDBOX_CLIENT_SECRET=
 **Usage:**
 
 ```php
-$pay = Larapay::init('paypal')
+$pay = Larapay::driver('paypal')
     ->cart(id: $order->id, description: 'Order #'.$order->id, amount: 100.00)
     ->pay();
 
@@ -284,7 +311,7 @@ if (!$pay->hasError()) {
 **Callback verification:**
 
 ```php
-$check = Larapay::init('paypal')->check2(request()->query());
+$check = Larapay::driver('paypal')->check2(request()->query());
 
 if ($check->paymentAccepted()) {
     $transaction->status = 'success';
@@ -304,7 +331,7 @@ TAB_MERCHANT_CODE=
 **Usage:**
 
 ```php
-$pay = Larapay::init('tab')
+$pay = Larapay::driver('tab')
     ->billing(name: 'Ahmed Ali', email: 'ahmed@example.com')
     ->cart(id: $order->id, description: 'Order #'.$order->id, amount: 200.00)
     ->pay();
@@ -318,7 +345,7 @@ if (!$pay->hasError()) {
 **Callback verification:**
 
 ```php
-$check = Larapay::init('tab')->check2(request()->query());
+$check = Larapay::driver('tab')->check2(request()->query());
 
 if ($check->paymentAccepted()) {
     $transaction->status = 'success';
@@ -331,12 +358,10 @@ if ($check->paymentAccepted()) {
 
 All gateways share the same callback routes. They are automatically registered by the service provider:
 
-```
-GET|POST  /larapay/{gateway}/client-callback   → clientCallback($gateway)
-GET|POST  /larapay/{gateway}/server-callback   → serverCallback($gateway)
-```
+GET|POST  /{config:prefix}/{gateway}/client-callback   → clientCallback($gateway)
+GET|POST  /{config:prefix}/{gateway}/server-callback   → serverCallback($gateway)
 
-The `clientCallback` controller method handles each gateway's specific return format and updates the `larapay_transactions` table automatically.
+The `clientCallback` controller method handles each gateway's specific return format, updates the `larapay_transactions` table automatically, and fires `PaymentSucceeded` or `PaymentFailed` events.
 
 ---
 
@@ -382,7 +407,12 @@ The package registers these routes for quick testing:
 All gateway instances share these chainable methods:
 
 ```php
+use Larapay\Facades\Larapay;
+
+Larapay::driver('paypal') // get driver (new Manager pattern)
+Larapay::init('paypal') // backward compatible alias for driver()
 ->billing(...)          // set customer details
+
 ->cart(...)             // set order id, description, amount, currency
 ->set(...)              // set any property (uid, refrance, currency, etc.)
 ->pay()                 // initiate payment (builds redirect URL or form params)
@@ -402,6 +432,23 @@ All gateway instances share these chainable methods:
 ->paymentAccepted()     // bool — payment was successful
 ->paymentCancelled()    // bool — payment failed / cancelled
 ->json()                // object — raw gateway response
+```
+
+---
+
+## Custom Gateways
+
+Because Larapay uses the Laravel Manager pattern, you can easily extend it to add your own custom gateway drivers without modifying the package source:
+
+```php
+use Larapay\Facades\Larapay;
+
+public function boot()
+{
+    Larapay::extend('stripe', function ($app) {
+        return new StripeGateway(); // Must implement LarapayInterface
+    });
+}
 ```
 
 ---
