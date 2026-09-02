@@ -98,7 +98,13 @@ class Payfort extends LarapayBase implements LarapayInterface
     // Interface
     // =========================================================================
 
-    public function init(): static { return $this; }
+    public function init(): static 
+    { 
+        if (empty($this->access_code) || empty($this->merchant_identifier) || empty($this->sha_request_phrase)) {
+            throw new \Larapay\Core\Exceptions\GatewayConfigurationException("Payfort {$this->mode} configuration is missing required keys.");
+        }
+        return $this; 
+    }
 
     public function set(
         ?string $uid              = null,

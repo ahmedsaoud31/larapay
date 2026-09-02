@@ -8,6 +8,15 @@ return [
     // default currency
     'currency' => env('LARAPAY_CURRENCY', 'EGP'),
 
+    // Debug Mode: Log API requests/responses
+    'debug' => env('LARAPAY_DEBUG', false),
+
+    // Package route settings
+    'routes' => [
+        'prefix' => env('LARAPAY_ROUTE_PREFIX', 'larapay'),
+        'middleware' => ['web'],
+    ],
+
     'paypal' => [
         'live' => [
             'client_id' => env('PAYPAL_LIVE_CLIENT_ID', ''),

@@ -46,8 +46,12 @@ class Tab extends LarapayBase implements LarapayInterface
         $this->cart_description = $cart_description;
     }
 
-    public function init(): static
+    public function init(): Tab
     {
+        $mode = $this->mode === 'live' ? 'live' : 'sandbox';
+        if (empty(config("larapay.tab.{$mode}.api_key"))) {
+            throw new \Larapay\Core\Exceptions\GatewayConfigurationException("Tab Travel {$mode} api_key is missing in configuration.");
+        }
         return $this;
     }
 

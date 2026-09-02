@@ -53,6 +53,9 @@ class PayTabs extends LarapayBase implements LarapayInterface
 
   public function init(): static
   {
+    if (empty($this->profile_id) || empty($this->server_key)) {
+        throw new \Larapay\Core\Exceptions\GatewayConfigurationException("PayTabs {$this->mode} server_key or profile_id is missing in configuration.");
+    }
     return $this;
   }
 

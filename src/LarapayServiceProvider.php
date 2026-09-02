@@ -53,15 +53,19 @@ class LarapayServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->singleton('larapay', function ($app) {
+            return new LarapayManager($app);
+        });
     }
 
     private function loadRoutes(): void
     {
-        \Illuminate\Support\Facades\Route::middleware('web')
-            ->group(function () {
-                $this->loadRoutesFrom(__DIR__.'/../routes/larapay.php');
-            });
+        \Illuminate\Support\Facades\Route::group(config('larapay.routes', [
+            'prefix' => 'larapay',
+            'middleware' => ['web'],
+        ]), function () {
+            $this->loadRoutesFrom(__DIR__.'/../routes/larapay.php');
+        });
     }
 
     private function loadConfig()

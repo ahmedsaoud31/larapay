@@ -57,6 +57,9 @@ class PayMob extends LarapayBase implements LarapayInterface
 
   public function init(): PayMob
   {
+    if (empty($this->api_key) || empty($this->secret_key) || empty($this->public_key)) {
+        throw new \Larapay\Core\Exceptions\GatewayConfigurationException("PayMob {$this->mode} api_key, secret_key, or public_key is missing in configuration.");
+    }
     return $this;
   }
 

@@ -89,7 +89,13 @@ class Kashier extends LarapayBase implements LarapayInterface
     // Interface
     // =========================================================================
 
-    public function init(): static { return $this; }
+    public function init(): static 
+    { 
+        if (empty($this->mid) || empty($this->api_key)) {
+            throw new \Larapay\Core\Exceptions\GatewayConfigurationException("Kashier mid or api_key is missing in configuration.");
+        }
+        return $this; 
+    }
 
     public function set(
         ?string $uid                        = null,

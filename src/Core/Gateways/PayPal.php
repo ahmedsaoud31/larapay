@@ -70,10 +70,16 @@ class PayPal extends LarapayBase implements LarapayInterface
   protected function getPaypalConfig(): array
   {
       $mode = $this->mode === 'live' ? 'live' : 'sandbox';
+      $clientId = config("larapay.paypal.{$mode}.client_id");
+      
+      if (empty($clientId)) {
+          throw new \Larapay\Core\Exceptions\GatewayConfigurationException("PayPal {$mode} client_id is missing in configuration.");
+      }
+
       return [
           'mode'    => $mode,
           $mode => [
-              'client_id'         => config("larapay.paypal.{$mode}.client_id"),
+              'client_id'         => $clientId,
               'client_secret'     => config("larapay.paypal.{$mode}.client_secret"),
               'app_id'            => config("larapay.paypal.{$mode}.app_id"),
           ],

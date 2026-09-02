@@ -15,13 +15,22 @@ trait HTTPRequest
 
   public function post($url, $data = [], $headers = [], $options = []): void
   {
+    if (config('larapay.debug')) {
+      \Illuminate\Support\Facades\Log::info("[Larapay] POST {$url}", ['data' => $data, 'headers' => $headers]);
+    }
     try{
       $this->response = Http::withHeaders($headers)
                               ->withOptions($options)
                               ->post($url, $data);
+      if (config('larapay.debug')) {
+        \Illuminate\Support\Facades\Log::info("[Larapay] POST {$url} Response", ['status' => $this->response->status(), 'body' => $this->response->body()]);
+      }
     }catch(Exception $e){
+      if (config('larapay.debug')) {
+        \Illuminate\Support\Facades\Log::error("[Larapay] POST {$url} Error", ['error' => $e->getMessage()]);
+      }
       $ex = new GatewayConnectionException($this->gateway);
-      $this->error = $ex->msg;
+      $this->error = $ex->getMessage();
       throw $ex;
     }
     $this->handleErrors();
@@ -29,11 +38,20 @@ trait HTTPRequest
 
   public function get($url, $data = [], $headers = [], $options = []): void
   {
+    if (config('larapay.debug')) {
+      \Illuminate\Support\Facades\Log::info("[Larapay] GET {$url}", ['data' => $data, 'headers' => $headers]);
+    }
     try{
       $this->response = Http::withHeaders($headers)->get($url, $data);
+      if (config('larapay.debug')) {
+        \Illuminate\Support\Facades\Log::info("[Larapay] GET {$url} Response", ['status' => $this->response->status(), 'body' => $this->response->body()]);
+      }
     }catch(Exception $e){
+      if (config('larapay.debug')) {
+        \Illuminate\Support\Facades\Log::error("[Larapay] GET {$url} Error", ['error' => $e->getMessage()]);
+      }
       $ex = new GatewayConnectionException($this->gateway);
-      $this->error = $ex->msg;
+      $this->error = $ex->getMessage();
       throw $ex;
     }
     $this->handleErrors();
@@ -41,11 +59,20 @@ trait HTTPRequest
 
   public function put($url, $data = [], $headers = [], $options = []): void
   {
+    if (config('larapay.debug')) {
+      \Illuminate\Support\Facades\Log::info("[Larapay] PUT {$url}", ['data' => $data, 'headers' => $headers]);
+    }
     try{
       $this->response = Http::withHeaders($headers)->put($url, $data);
+      if (config('larapay.debug')) {
+        \Illuminate\Support\Facades\Log::info("[Larapay] PUT {$url} Response", ['status' => $this->response->status(), 'body' => $this->response->body()]);
+      }
     }catch(Exception $e){
+      if (config('larapay.debug')) {
+        \Illuminate\Support\Facades\Log::error("[Larapay] PUT {$url} Error", ['error' => $e->getMessage()]);
+      }
       $ex = new GatewayConnectionException($this->gateway);
-      $this->error = $ex->msg;
+      $this->error = $ex->getMessage();
       throw $ex;
     }
     $this->handleErrors();

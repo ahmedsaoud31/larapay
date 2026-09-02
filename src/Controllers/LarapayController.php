@@ -219,6 +219,8 @@ class LarapayController extends Controller
     }
 
     $refund->registerRefund($transaction);
+    
+    event(new \Larapay\Events\PaymentRefunded($transaction, (array) $refund->json()));
 
     return response()->json([
       'success'  => true,
@@ -685,8 +687,10 @@ class LarapayController extends Controller
         $transaction->response = json_encode(request()->post());
         if (!$verify->hasError() && $verify->paymentAccepted()) {
           $transaction->status = 'success';
+          event(new \Larapay\Events\PaymentSucceeded($transaction, (array)$verify->json()));
         } elseif (!$verify->hasError() && $verify->paymentCancelled()) {
           $transaction->status = 'cancelled';
+          event(new \Larapay\Events\PaymentFailed($transaction, (array)$verify->json(), 'Cancelled by user'));
         }
         $transaction->save();
         
@@ -706,14 +710,17 @@ class LarapayController extends Controller
         $transaction->status = 'success';
         $transaction->response = json_encode($check->json());
         $transaction->save();
+        event(new \Larapay\Events\PaymentSucceeded($transaction, (array)$check->json()));
         return view('larapay::gateways.kashier.result', ['status' => 'success', 'transaction' => $transaction, 'storeName' => config('app.name')]);
       }
       if($check->paymentCancelled()){
         $transaction->status = 'cancelled';
         $transaction->response = json_encode($check->json());
         $transaction->save();
+        event(new \Larapay\Events\PaymentFailed($transaction, (array)$check->json(), 'Cancelled by user'));
         return view('larapay::gateways.kashier.result', ['status' => 'cancelled', 'transaction' => $transaction, 'storeName' => config('app.name')]);
       }else{
+        event(new \Larapay\Events\PaymentFailed($transaction, (array)$check->json(), 'Failed'));
         return view('larapay::gateways.kashier.result', ['status' => 'failed', 'transaction' => $transaction, 'storeName' => config('app.name')]);
       }
     }else{
