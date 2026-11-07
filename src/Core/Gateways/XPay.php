@@ -46,10 +46,10 @@ class XPay extends LarapayBase implements LarapayInterface
     protected const BASE_URL = 'https://api.xpay.app';
 
     protected const ALLOWED_REFUND_REASONS = [
-        'requested_by_customer',
-        'duplicate',
-        'fraudulent',
-        'expired_uncaptured_charge',
+        'REQUESTED_BY_CUSTOMER',
+        'DUPLICATE',
+        'FRAUDULENT',
+        'RISK_HOLD_CAPTURE',
     ];
 
     protected ?string $publishable_key = null;
@@ -59,6 +59,10 @@ class XPay extends LarapayBase implements LarapayInterface
 
     protected ?float  $amount            = null;
     protected ?float  $total_amount      = null;
+    protected bool    $pass_fees         = false;
+    protected float   $fee_percentage    = 0.0;
+    protected float   $fee_fixed         = 0.0;
+    protected ?float  $fee_amount        = null;
     protected ?string $currency          = null;
     protected ?string $server_callback   = null;
     protected ?string $client_callback   = null;
@@ -83,6 +87,9 @@ class XPay extends LarapayBase implements LarapayInterface
                               ?: config("larapay.{$gateway}.{$this->mode}.api_key");
         $this->webhook_secret  = config("larapay.{$gateway}.{$this->mode}.webhook_secret");
         $this->currency        = Str::upper(config("larapay.{$gateway}.currency") ?: config('larapay.currency', 'USD'));
+        $this->pass_fees       = (bool) config("larapay.{$gateway}.pass_fees", false);
+        $this->fee_percentage  = max(0.0, (float) config("larapay.{$gateway}.fee_percentage", 0));
+        $this->fee_fixed       = max(0.0, (float) config("larapay.{$gateway}.fee_fixed", 0));
         $this->endpoint        = rtrim(self::BASE_URL, '/') . '/';
 
         $this->server_callback = config("larapay.{$gateway}.server_callback") ?: route('larapay.server-callback', $gateway);
@@ -118,6 +125,10 @@ class XPay extends LarapayBase implements LarapayInterface
         ?LarapayTransaction $transaction = null,
         ?string $reason                  = null,
         array   $metadata                = [],
+        ?bool   $pass_fees               = null,
+        ?float  $fee_percentage          = null,
+        ?float  $fee_fixed               = null,
+        ?float  $fee_amount              = null,
     ): static {
         $this->uid               = $uid               ?? $this->uid;
         $this->currency          = $currency          ? Str::upper($currency) : $this->currency;
@@ -132,6 +143,10 @@ class XPay extends LarapayBase implements LarapayInterface
         $this->charge_id         = $charge_id         ?? $this->charge_id;
         $this->transaction       = $transaction       ?? $this->transaction;
         $this->reason            = $reason            ?? $this->reason;
+        $this->pass_fees         = $pass_fees         ?? $this->pass_fees;
+        $this->fee_percentage    = $fee_percentage    !== null ? max(0.0, $fee_percentage) : $this->fee_percentage;
+        $this->fee_fixed         = $fee_fixed         !== null ? max(0.0, $fee_fixed) : $this->fee_fixed;
+        $this->fee_amount        = $fee_amount        ?? $this->fee_amount;
         if ($metadata) {
             $this->metadata = array_merge($this->metadata, $metadata);
         }
@@ -174,8 +189,18 @@ class XPay extends LarapayBase implements LarapayInterface
             return $this;
         }
 
-        $this->total_amount = round((float) $this->amount, 2);
-        $unitAmount         = $this->toMinorUnits($this->total_amount);
+        $baseAmount = round((float) $this->amount, 2);
+        $unitAmount = $this->toMinorUnits($baseAmount);
+
+        $computedFee = 0.0;
+        if ($this->fee_amount !== null && $this->fee_amount > 0) {
+            $computedFee = round((float) $this->fee_amount, 2);
+        } elseif ($this->pass_fees && ($this->fee_percentage > 0 || $this->fee_fixed > 0)) {
+            $computedFee = round(($baseAmount * ($this->fee_percentage / 100)) + $this->fee_fixed, 2);
+        }
+
+        $this->fee_amount   = $computedFee;
+        $this->total_amount = round($baseAmount + $computedFee, 2);
 
         $orderRef    = (string) ($this->cart_id ?? $this->uid ?? uniqid('order_'));
         $productName = trim((string) ($this->cart_description ?: "Order #{$orderRef}"));
@@ -191,9 +216,43 @@ class XPay extends LarapayBase implements LarapayInterface
             'customer_name'  => $this->billing['name'] ?? null,
             'customer_email' => $this->billing['email'] ?? null,
             'customer_phone' => $this->billing['phone'] ?? null,
+            'base_amount'    => (string) $baseAmount,
+            'fee_amount'     => $computedFee > 0 ? (string) $computedFee : null,
         ], $this->metadata);
 
         $metadata = array_filter($metadata, fn ($v) => $v !== null && $v !== '');
+
+        $lineItems = [
+            [
+                'priceData' => [
+                    'currency'    => $this->currency,
+                    'unitAmount'  => $unitAmount,
+                    'productData' => [
+                        'name'        => Str::limit($productName, 120, ''),
+                        'description' => Str::limit($productName, 250, ''),
+                    ],
+                ],
+                'quantity' => 1,
+            ],
+        ];
+
+        if ($computedFee > 0 && $this->toMinorUnits($computedFee) > 0) {
+            $feeLabel = $this->fee_percentage > 0
+                ? 'Payment Gateway Fee (' . rtrim(rtrim(number_format($this->fee_percentage, 2, '.', ''), '0'), '.') . '%)'
+                : 'Payment Gateway Fee';
+
+            $lineItems[] = [
+                'priceData' => [
+                    'currency'    => $this->currency,
+                    'unitAmount'  => $this->toMinorUnits($computedFee),
+                    'productData' => [
+                        'name'        => $feeLabel,
+                        'description' => 'Online payment processing fee',
+                    ],
+                ],
+                'quantity' => 1,
+            ];
+        }
 
         $body = [
             'currency'        => $this->currency,
@@ -203,19 +262,7 @@ class XPay extends LarapayBase implements LarapayInterface
                     'url' => $returnUrl,
                 ],
             ],
-            'lineItems' => [
-                [
-                    'priceData' => [
-                        'currency'    => $this->currency,
-                        'unitAmount'  => $unitAmount,
-                        'productData' => [
-                            'name'        => Str::limit($productName, 120, ''),
-                            'description' => Str::limit($productName, 250, ''),
-                        ],
-                    ],
-                    'quantity' => 1,
-                ],
-            ],
+            'lineItems' => $lineItems,
         ];
 
         if ($this->cancel_url) {
@@ -313,8 +360,10 @@ class XPay extends LarapayBase implements LarapayInterface
      */
     public function refund(?float $amount = null, ?string $reason = null): static
     {
-        $this->amount = $amount ?? $this->amount;
-        $this->reason = $reason ?? $this->reason;
+        $this->amount           = $amount ?? $this->amount;
+        $this->reason           = $reason ?? $this->reason;
+        $this->refundRegistered = false;
+        $this->refund_id        = null;
 
         if ($this->hasError()) return $this;
 
@@ -331,14 +380,23 @@ class XPay extends LarapayBase implements LarapayInterface
         }
 
         $rawReason = trim((string) ($this->reason ?? ''));
-        $enumReason = in_array($rawReason, self::ALLOWED_REFUND_REASONS, true)
-            ? $rawReason
-            : 'requested_by_customer';
+        $upperReason = Str::upper(str_replace([' ', '-'], '_', $rawReason));
+        if ($upperReason === 'EXPIRED_UNCAPTURED_CHARGE') {
+            $upperReason = 'RISK_HOLD_CAPTURE';
+        }
+        $enumReason = in_array($upperReason, self::ALLOWED_REFUND_REASONS, true)
+            ? $upperReason
+            : 'REQUESTED_BY_CUSTOMER';
+
+        $minorAmount = $this->resolveRefundMinorUnits((float) $this->amount);
 
         $body = [
-            'amount' => $this->toMinorUnits((float) $this->amount),
             'reason' => $enumReason,
         ];
+
+        if ($minorAmount !== null && $minorAmount > 0) {
+            $body['amount'] = $minorAmount;
+        }
 
         if ($paymentIntentId) {
             $body['paymentIntentId'] = $paymentIntentId;
@@ -346,7 +404,7 @@ class XPay extends LarapayBase implements LarapayInterface
             $body['chargeId'] = $chargeId;
         }
 
-        if ($rawReason !== '' && ! in_array($rawReason, self::ALLOWED_REFUND_REASONS, true)) {
+        if ($rawReason !== '' && ! in_array($upperReason, self::ALLOWED_REFUND_REASONS, true)) {
             $body['description'] = Str::limit($rawReason, 250, '');
         }
 
@@ -357,6 +415,19 @@ class XPay extends LarapayBase implements LarapayInterface
 
         $this->request('post', $this->endpoint . 'refunds', $body);
 
+        // Fallback 1: If paymentIntentId was rejected and we also have a specific chargeId, retry with chargeId
+        if ($this->hasError() && $paymentIntentId && $chargeId) {
+            unset($body['paymentIntentId']);
+            $body['chargeId'] = $chargeId;
+            $this->request('post', $this->endpoint . 'refunds', $body);
+        }
+
+        // Fallback 2: If refunding the full remaining balance failed due to minor-unit/currency conversion, retry omitting `amount`
+        if ($this->hasError() && isset($body['amount']) && $this->isFullRemainingRefund((float) $this->amount)) {
+            unset($body['amount']);
+            $this->request('post', $this->endpoint . 'refunds', $body);
+        }
+
         if ($this->hasError()) return $this;
 
         $json               = $this->json();
@@ -365,7 +436,10 @@ class XPay extends LarapayBase implements LarapayInterface
 
         if (! $this->refundAccepted()) {
             $status = $json->status ?? 'unknown';
-            $this->error = __("XPay refund did not succeed (status: {$status}).");
+            $failureMsg = $json->failureMessage ?? $json->failureReason ?? $json->pendingReason ?? null;
+            $this->error = $failureMsg
+                ? __("XPay refund did not succeed ({$status}): {$failureMsg}")
+                : __("XPay refund did not succeed (status: {$status}).");
             return $this;
         }
 
@@ -374,6 +448,78 @@ class XPay extends LarapayBase implements LarapayInterface
         }
 
         return $this;
+    }
+
+    /**
+     * Determine whether the requested refund covers the entire remaining refundable balance of the transaction.
+     */
+    protected function isFullRemainingRefund(float $requestedAmount): bool
+    {
+        if (! $this->transaction || (float) $this->transaction->amount <= 0) {
+            return false;
+        }
+
+        $alreadyRefunded = (float) $this->transaction->children()
+            ->where('type', 'refund')
+            ->where('status', 'success')
+            ->sum('amount');
+
+        $remaining = round(max(0.0, (float) $this->transaction->amount - $alreadyRefunded), 2);
+
+        return $remaining > 0 && abs($requestedAmount - $remaining) < 0.01;
+    }
+
+    /**
+     * Resolve the refund `amount` in minor units for `POST /refunds`.
+     * Handles cross-currency settlement (e.g. USD presentment settled in EGP on XPay).
+     * Returns `null` when omitting `amount` is appropriate (full remaining refund on a cross-currency charge).
+     */
+    protected function resolveRefundMinorUnits(float $requestedAmount): ?int
+    {
+        $sessionData = $this->callbackData;
+        if ((empty($sessionData) || empty($sessionData['paymentIntent'])) && $this->transaction && ! empty($this->transaction->response)) {
+            $decoded = json_decode($this->transaction->response, true);
+            if (is_array($decoded)) {
+                $sessionData = $decoded;
+            }
+        }
+
+        $piCurrency = strtoupper((string) (
+            $sessionData['paymentIntent']['currency']
+            ?? $sessionData['paymentIntent']['latestCharge']['currency']
+            ?? ''
+        ));
+        $piAmount = $sessionData['paymentIntent']['amountReceived']
+            ?? $sessionData['paymentIntent']['amount']
+            ?? $sessionData['paymentIntent']['latestCharge']['amountCaptured']
+            ?? $sessionData['paymentIntent']['latestCharge']['amount']
+            ?? null;
+
+        $txCurrency = strtoupper((string) ($this->transaction?->currency ?: $this->currency ?: 'USD'));
+
+        // If the Charge was settled in a different currency (e.g. EGP) than the Checkout Session (e.g. USD):
+        if ($piCurrency !== '' && $txCurrency !== '' && $piCurrency !== $txCurrency) {
+            // For a full refund of the remaining balance, omit `amount` so XPay refunds the exact remaining Charge balance
+            if ($this->isFullRemainingRefund($requestedAmount)) {
+                return null;
+            }
+
+            // For a partial refund, scale proportionally against the Charge's minor-unit amount or exchangeRate
+            if (is_numeric($piAmount) && (int) $piAmount > 0 && $this->transaction && (float) $this->transaction->amount > 0) {
+                $ratio = $requestedAmount / (float) $this->transaction->amount;
+                return max(1, (int) round($ratio * (float) $piAmount));
+            }
+
+            $exchangeRate = $sessionData['paymentIntent']['presentmentDetails']['exchangeRate']
+                ?? $sessionData['presentmentDetails']['exchangeRate']
+                ?? null;
+
+            if (is_numeric($exchangeRate) && (float) $exchangeRate > 0) {
+                return max(1, $this->toMinorUnits($requestedAmount * (float) $exchangeRate));
+            }
+        }
+
+        return $this->toMinorUnits($requestedAmount);
     }
 
     /**
@@ -395,15 +541,18 @@ class XPay extends LarapayBase implements LarapayInterface
             $chId = $ref;
         }
 
-        if (! $piId && ! $chId && $this->transaction && ! empty($this->transaction->response)) {
+        if ((! $piId || ! $chId) && $this->transaction && ! empty($this->transaction->response)) {
             $stored = json_decode($this->transaction->response, true);
             if (is_array($stored)) {
-                $piId = $this->extractPaymentIntentId($stored);
-                $chId = $this->extractChargeId($stored);
+                $piId = $piId ?: $this->extractPaymentIntentId($stored);
+                $chId = $chId ?: $this->extractChargeId($stored);
+                if (empty($this->callbackData)) {
+                    $this->callbackData = $stored;
+                }
             }
         }
 
-        // If still missing and we have a Checkout Session ID (cs_...), fetch it from XPay
+        // If still missing paymentIntentId and we have a Checkout Session ID (cs_...), fetch it live from XPay
         if (! $piId && ! $chId && $ref !== '' && str_starts_with($ref, 'cs_')) {
             $savedAmount = $this->amount;
             $savedReason = $this->reason;
@@ -446,8 +595,21 @@ class XPay extends LarapayBase implements LarapayInterface
         if (! empty($data['chargeId']) && is_string($data['chargeId'])) {
             return $data['chargeId'];
         }
-        if (! empty($data['paymentIntent']['charges'][0]['id'])) {
-            return (string) $data['paymentIntent']['charges'][0]['id'];
+        if (! empty($data['paymentIntent']['latestCharge']['id'])) {
+            return (string) $data['paymentIntent']['latestCharge']['id'];
+        }
+        if (! empty($data['paymentIntent']['charges']) && is_array($data['paymentIntent']['charges'])) {
+            foreach ($data['paymentIntent']['charges'] as $charge) {
+                if (is_array($charge) && ! empty($charge['id'])) {
+                    $st = strtoupper((string) ($charge['status'] ?? ''));
+                    if ($st === 'SUCCEEDED' || ! empty($charge['paid'])) {
+                        return (string) $charge['id'];
+                    }
+                }
+            }
+            if (! empty($data['paymentIntent']['charges'][0]['id'])) {
+                return (string) $data['paymentIntent']['charges'][0]['id'];
+            }
         }
         if (! empty($data['charges'][0]['id'])) {
             return (string) $data['charges'][0]['id'];
@@ -548,7 +710,7 @@ class XPay extends LarapayBase implements LarapayInterface
             return false;
         }
         $status = strtolower((string) ($this->callbackData['status'] ?? ''));
-        return in_array($status, ['succeeded', 'pending', 'success'], true);
+        return in_array($status, ['succeeded', 'pending', 'requires_action', 'success'], true);
     }
 
     /**
