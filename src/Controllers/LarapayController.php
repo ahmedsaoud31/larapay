@@ -122,12 +122,10 @@ class LarapayController extends Controller
         'region'      => 'Egypt / MENA',
         'icon'        => 'ti-credit-card',
         'color'       => 'cyan',
-        'description' => 'XPay variable-amount hosted checkout supporting cards, Fawry, Aman kiosk, mobile wallets and ValU.',
+        'description' => 'XPay hosted checkout sessions supporting cards, Fawry, Aman kiosk, mobile wallets and ValU.',
         'currencies'  => ['USD', 'EGP', 'EUR', 'GBP', 'SAR', 'AED'],
         'methods'     => ['Card', 'Fawry', 'Kiosk', 'Wallet', 'ValU'],
-        'configured'  => !empty(config("larapay.xpay.{$mode}.api_key"))
-                      && !empty(config('larapay.xpay.community_id'))
-                      && !empty(config('larapay.xpay.variable_amount_id')),
+        'configured'  => !empty(config("larapay.xpay.{$mode}.secret_key")),
         'refundable'  => true,
         'actions' => [
           ['label' => 'Test XPay Checkout', 'url' => '#', 'icon' => 'ti-arrow-right', 'style' => 'primary', 'currency' => 'USD', 'action' => 'default'],

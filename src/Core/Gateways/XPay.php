@@ -14,74 +14,76 @@ use Larapay\Core\LarapayInterface;
 use Larapay\Models\LarapayTransaction;
 
 /**
- * XPay (xpay.app) payment gateway.
+ * XPay (xpay.app) payment gateway driver (Modern Checkout Sessions & Refunds API).
  *
  * Flow:
- *   1. pay()     POST /api/v1/payments/pay/variable-amount  → iframe_url + transaction_uuid
- *                The customer is redirected to iframe_url (getRedirect()).
- *   2. XPay redirects the customer to the "Redirect URL" and POSTs the
- *      "Callback URL" configured in the XPay dashboard (per API Payment).
- *   3. check()   GET  /api/v1/communities/{community_id}/transactions/{uuid}/
- *                Always use this to verify status server-side.
- *   4. refund()  POST /api/payments/refund-transaction/  (full or partial)
+ *   1. pay()     POST https://api.xpay.app/checkout/sessions
+ *                Returns Checkout Session (cs_test_... / cs_live_...) and hosted checkout `url`.
+ *                Customer is redirected to `getRedirect()`.
+ *   2. Return    XPay replaces `{CHECKOUT_SESSION_ID}` in `afterCompletion.redirect.url`
+ *                and redirects the customer browser back, plus sends signed webhooks
+ *                (`checkout.session.completed`, `checkout.session.async_payment_succeeded`).
+ *   3. check()   GET  https://api.xpay.app/checkout/sessions/{session_id}
+ *                Verifies `paymentStatus === 'paid'` and `status === 'complete'` server-side.
+ *   4. refund()  POST https://api.xpay.app/refunds
+ *                Full or partial refund in minor units using `paymentIntentId` (`pi_...`) or `chargeId` (`ch_...`).
  *
  * Config keys (config/larapay.php → 'xpay'):
- *   community_id        – Community (merchant) ID
- *   variable_amount_id  – ID of the "API Payment" created in the XPay dashboard
- *   live.api_key        – Live x-api-key
- *   sandbox.api_key     – Staging x-api-key
- *   pay_using           – card | fawry | kiosk | meeza/digital | valu | apple
- *   language            – en | ar
- *   add_fees            – true to add XPay service fees on top (prepare-amount)
+ *   live.publishable_key    – pk_live_...
+ *   live.secret_key         – sk_live_...
+ *   live.webhook_secret     – whsec_...
+ *   sandbox.publishable_key – pk_test_...
+ *   sandbox.secret_key      – sk_test_...
+ *   sandbox.webhook_secret  – whsec_...
+ *   currency                – USD | EGP | EUR | GBP | SAR | AED (default USD)
  *
- * @see https://xpayeg.github.io/docs/
+ * @see https://docs.xpay.app/en
  */
 class XPay extends LarapayBase implements LarapayInterface
 {
     use Cart, Billing;
 
-    protected const HOST_LIVE = 'https://community.xpay.app';
-    protected const HOST_TEST = 'https://staging.xpay.app';
+    protected const BASE_URL = 'https://api.xpay.app';
 
-    protected ?string $community_id       = null;
-    protected ?string $api_key            = null;
-    protected ?int    $variable_amount_id = null;
-    protected ?string $pay_using          = 'card';
-    protected ?string $language           = 'en';
-    protected bool    $add_fees           = false;
-    protected ?string $endpoint           = null;
+    protected const ALLOWED_REFUND_REASONS = [
+        'requested_by_customer',
+        'duplicate',
+        'fraudulent',
+        'expired_uncaptured_charge',
+    ];
 
-    protected ?float  $amount          = null;
-    protected ?float  $total_amount    = null;
-    protected ?string $currency        = null;
-    protected ?string $server_callback = null;
-    protected ?string $client_callback = null;
-    protected ?string $refrance        = null;
-    protected ?string $reason          = null;
-    protected ?string $member_id       = null;
-    protected array   $custom_fields   = [];
+    protected ?string $publishable_key = null;
+    protected ?string $secret_key      = null;
+    protected ?string $webhook_secret  = null;
+    protected ?string $endpoint        = null;
+
+    protected ?float  $amount            = null;
+    protected ?float  $total_amount      = null;
+    protected ?string $currency          = null;
+    protected ?string $server_callback   = null;
+    protected ?string $client_callback   = null;
+    protected ?string $cancel_url        = null;
+    protected ?string $refrance          = null;
+    protected ?string $payment_intent_id = null;
+    protected ?string $charge_id         = null;
+    protected ?string $refund_id         = null;
+    protected ?string $reason            = null;
+    protected array   $metadata          = [];
     protected ?LarapayTransaction $transaction = null;
 
-    protected ?string $iframe_url     = null;
-    protected ?int    $transaction_id = null;
-    protected array   $callbackData   = [];
+    protected ?string $iframe_url       = null;
+    protected array   $callbackData     = [];
     protected bool    $refundRegistered = false;
-
-    protected array $acceptedSuccessStatus = ['SUCCESSFUL', 'SUCCESS', 'PAID', 'CAPTURED'];
-    protected array $cancelledStatus       = ['FAILED', 'FAILURE', 'CANCELLED', 'CANCELED', 'DECLINED', 'EXPIRED', 'VOIDED'];
 
     public function __construct(protected string $gateway, protected string $mode)
     {
-        $this->mode               = $mode === 'live' ? 'live' : 'sandbox';
-        $this->community_id       = config("larapay.{$gateway}.community_id");
-        $this->api_key            = config("larapay.{$gateway}.{$this->mode}.api_key");
-        $vaId                     = config("larapay.{$gateway}.variable_amount_id");
-        $this->variable_amount_id = is_numeric($vaId) ? (int) $vaId : null;
-        $this->pay_using          = config("larapay.{$gateway}.pay_using", 'card') ?: 'card';
-        $this->language           = config("larapay.{$gateway}.language", 'en') ?: 'en';
-        $this->add_fees           = (bool) config("larapay.{$gateway}.add_fees", false);
-        $this->currency           = Str::upper(config("larapay.{$gateway}.currency") ?: config('larapay.currency', 'EGP'));
-        $this->endpoint           = $this->host() . '/api/v1/';
+        $this->mode            = $mode === 'live' ? 'live' : 'sandbox';
+        $this->publishable_key = config("larapay.{$gateway}.{$this->mode}.publishable_key");
+        $this->secret_key      = config("larapay.{$gateway}.{$this->mode}.secret_key")
+                              ?: config("larapay.{$gateway}.{$this->mode}.api_key");
+        $this->webhook_secret  = config("larapay.{$gateway}.{$this->mode}.webhook_secret");
+        $this->currency        = Str::upper(config("larapay.{$gateway}.currency") ?: config('larapay.currency', 'USD'));
+        $this->endpoint        = rtrim(self::BASE_URL, '/') . '/';
 
         $this->server_callback = config("larapay.{$gateway}.server_callback") ?: route('larapay.server-callback', $gateway);
         $this->client_callback = config("larapay.{$gateway}.client_callback") ?: route('larapay.client-callback', $gateway);
@@ -90,13 +92,13 @@ class XPay extends LarapayBase implements LarapayInterface
     }
 
     // =========================================================================
-    // Interface
+    // Interface & Configuration
     // =========================================================================
 
     public function init(): static
     {
-        if (empty($this->community_id) || empty($this->api_key)) {
-            throw new GatewayConfigurationException("XPay community_id or {$this->mode} api_key is missing in configuration.");
+        if (empty($this->secret_key)) {
+            throw new GatewayConfigurationException("XPay {$this->mode} secret_key (sk_...) is missing in configuration.");
         }
         return $this;
     }
@@ -109,83 +111,57 @@ class XPay extends LarapayBase implements LarapayInterface
         ?string $cart_description        = null,
         ?string $server_callback         = null,
         ?string $client_callback         = null,
+        ?string $cancel_url              = null,
         ?string $refrance                = null,
-        ?string $pay_using               = null,
-        ?string $language                = null,
-        ?string $member_id               = null,
-        ?int    $variable_amount_id      = null,
+        ?string $payment_intent_id       = null,
+        ?string $charge_id               = null,
         ?LarapayTransaction $transaction = null,
         ?string $reason                  = null,
+        array   $metadata                = [],
     ): static {
-        $this->uid                = $uid                ?? $this->uid;
-        $this->currency           = $currency           ? Str::upper($currency) : $this->currency;
-        $this->amount             = $amount             ?? $this->amount;
-        $this->cart_id            = $cart_id            ?? $this->cart_id;
-        $this->cart_description   = $cart_description   ?? $this->cart_description;
-        $this->server_callback    = $server_callback    ?? $this->server_callback;
-        $this->client_callback    = $client_callback    ?? $this->client_callback;
-        $this->refrance           = $refrance           ?? $this->refrance;
-        $this->pay_using          = $pay_using          ?? $this->pay_using;
-        $this->language           = $language           ?? $this->language;
-        $this->member_id          = $member_id          ?? $this->member_id;
-        $this->variable_amount_id = $variable_amount_id ?? $this->variable_amount_id;
-        $this->transaction        = $transaction        ?? $this->transaction;
-        $this->reason             = $reason             ?? $this->reason;
+        $this->uid               = $uid               ?? $this->uid;
+        $this->currency          = $currency          ? Str::upper($currency) : $this->currency;
+        $this->amount            = $amount            ?? $this->amount;
+        $this->cart_id           = $cart_id           ?? $this->cart_id;
+        $this->cart_description  = $cart_description  ?? $this->cart_description;
+        $this->server_callback   = $server_callback   ?? $this->server_callback;
+        $this->client_callback   = $client_callback   ?? $this->client_callback;
+        $this->cancel_url        = $cancel_url        ?? $this->cancel_url;
+        $this->refrance          = $refrance          ?? $this->refrance;
+        $this->payment_intent_id = $payment_intent_id ?? $this->payment_intent_id;
+        $this->charge_id         = $charge_id         ?? $this->charge_id;
+        $this->transaction       = $transaction       ?? $this->transaction;
+        $this->reason            = $reason            ?? $this->reason;
+        if ($metadata) {
+            $this->metadata = array_merge($this->metadata, $metadata);
+        }
         return $this;
     }
 
     /**
-     * Extra data saved with the XPay invoice (shown in the XPay dashboard
-     * and echoed back in the callback body).
+     * Attach custom metadata key-value pairs to the Checkout Session or Refund.
      *
-     * @param array<string, string|int|float|bool> $fields label => value
+     * @param array<string, scalar> $fields
      */
     public function customFields(array $fields): static
     {
-        foreach ($fields as $label => $value) {
-            $this->custom_fields[] = ['field_label' => (string) $label, 'field_value' => $value];
+        foreach ($fields as $key => $value) {
+            if ($value !== null && $value !== '') {
+                $this->metadata[(string) $key] = (string) $value;
+            }
         }
         return $this;
     }
 
     // =========================================================================
-    // Prepare amount (service fees)
+    // Pay (Create Checkout Session)
     // =========================================================================
 
     /**
-     * POST /api/v1/payments/prepare-amount/
-     * Returns the total amount including XPay service fees (or null on error).
-     */
-    public function prepareAmount(?float $amount = null): ?float
-    {
-        $amount = $amount ?? $this->amount;
-
-        $this->request('post', $this->endpoint . 'payments/prepare-amount/', [
-            'community_id'            => $this->community_id,
-            'amount'                  => round((float) $amount, 2),
-            'currency'                => $this->currency,
-            'selected_payment_method' => $this->pay_using,
-        ]);
-
-        if ($this->hasError()) return null;
-
-        $total = $this->json()->data->total_amount ?? null;
-        if (! is_numeric($total)) {
-            $this->error = __('XPay did not return a total amount.');
-            return null;
-        }
-
-        return $this->total_amount = round((float) $total, 2);
-    }
-
-    // =========================================================================
-    // Pay
-    // =========================================================================
-
-    /**
-     * POST /api/v1/payments/pay/variable-amount
-     * On success, getRedirect() returns the XPay hosted payment page (iframe_url)
-     * and getTransactionUuid() the XPay transaction UUID.
+     * POST https://api.xpay.app/checkout/sessions
+     * Creates a hosted Checkout Session.
+     * On success, getRedirect() returns the XPay checkout URL (`https://checkout.xpay.app/c/cs_...`)
+     * and getTransactionUuid() returns the session ID (`cs_test_...` / `cs_live_...`).
      */
     public function pay(?float $amount = null): static
     {
@@ -193,66 +169,78 @@ class XPay extends LarapayBase implements LarapayInterface
 
         $this->amount = $amount ?? $this->amount;
 
-        if (! $this->variable_amount_id) {
-            $this->error = __('XPay API Payment ID (variable_amount_id) is not configured.');
-            return $this;
-        }
         if (! $this->amount || $this->amount <= 0 || ! $this->currency) {
             $this->error = __('Amount and currency are required for XPay payment.');
             return $this;
         }
-        if (empty($this->billing['email']) || empty($this->billing['phone'])) {
-            $this->error = __('Customer email and phone number are required for XPay payment.');
-            return $this;
+
+        $this->total_amount = round((float) $this->amount, 2);
+        $unitAmount         = $this->toMinorUnits($this->total_amount);
+
+        $orderRef    = (string) ($this->cart_id ?? $this->uid ?? uniqid('order_'));
+        $productName = trim((string) ($this->cart_description ?: "Order #{$orderRef}"));
+
+        $returnUrl = (string) $this->client_callback;
+        if ($returnUrl !== '' && ! str_contains($returnUrl, '{CHECKOUT_SESSION_ID}')) {
+            $separator = str_contains($returnUrl, '?') ? '&' : '?';
+            $returnUrl .= $separator . 'session_id={CHECKOUT_SESSION_ID}';
         }
 
-        $original = round((float) $this->amount, 2);
-        $total    = $original;
+        $metadata = array_merge([
+            'order_id'       => $orderRef,
+            'customer_name'  => $this->billing['name'] ?? null,
+            'customer_email' => $this->billing['email'] ?? null,
+            'customer_phone' => $this->billing['phone'] ?? null,
+        ], $this->metadata);
 
-        if ($this->add_fees) {
-            $total = $this->prepareAmount($original);
-            if ($this->hasError()) return $this;
-        }
-        $this->total_amount = $total;
+        $metadata = array_filter($metadata, fn ($v) => $v !== null && $v !== '');
 
         $body = [
-            'community_id'       => $this->community_id,
-            'variable_amount_id' => $this->variable_amount_id,
-            'amount'             => $total,
-            'original_amount'    => $original,
-            'currency'           => $this->currency,
-            'pay_using'          => $this->pay_using,
-            'language'           => $this->language,
-            'billing_data'       => $this->billingPayload(),
+            'afterCompletion' => [
+                'type'     => 'redirect',
+                'redirect' => [
+                    'url' => $returnUrl,
+                ],
+            ],
+            'lineItems' => [
+                [
+                    'priceData' => [
+                        'currency'    => $this->currency,
+                        'unitAmount'  => $unitAmount,
+                        'productData' => [
+                            'name'        => Str::limit($productName, 120, ''),
+                            'description' => Str::limit($productName, 250, ''),
+                        ],
+                    ],
+                    'quantity' => 1,
+                ],
+            ],
         ];
 
-        if ($this->member_id) {
-            $body['membership_id'] = $this->member_id;
+        if ($this->cancel_url) {
+            $body['cancelUrl'] = $this->cancel_url;
         }
 
-        $fields = $this->custom_fields;
-        if ($this->cart_id) {
-            array_unshift($fields, ['field_label' => 'order_id', 'field_value' => (string) $this->cart_id]);
-        }
-        if ($fields) {
-            $body['custom_fields'] = $fields;
+        if ($metadata) {
+            $body['metadata'] = $metadata;
         }
 
-        $this->request('post', $this->endpoint . 'payments/pay/variable-amount', $body);
+        $this->request('post', $this->endpoint . 'checkout/sessions', $body);
 
         if ($this->hasError()) return $this;
 
-        $data = $this->json()->data ?? null;
+        $json = $this->json();
 
-        if (empty($data->transaction_uuid)) {
-            $this->error = __('XPay did not return a transaction reference.');
+        if (empty($json->id)) {
+            $this->error = __('XPay did not return a checkout session ID.');
             return $this;
         }
 
-        $this->callbackData   = (array) $data;
-        $this->refrance       = $data->transaction_uuid;
-        $this->transaction_id = isset($data->transaction_id) ? (int) $data->transaction_id : null;
-        $this->iframe_url     = $data->iframe_url ?? null;
+        $this->callbackData      = json_decode(json_encode($json), true) ?: [];
+        $this->refrance          = (string) $json->id;
+        $this->payment_intent_id = $this->extractPaymentIntentId($this->callbackData);
+        $this->charge_id         = $this->extractChargeId($this->callbackData);
+        $this->iframe_url        = $json->url ?? null;
 
         if ($this->iframe_url) {
             $this->redirect = $this->iframe_url;
@@ -262,35 +250,34 @@ class XPay extends LarapayBase implements LarapayInterface
     }
 
     // =========================================================================
-    // Inquiry
+    // Inquiry (Retrieve Checkout Session)
     // =========================================================================
 
     /**
-     * GET /api/v1/communities/{community_id}/transactions/{uuid}/
+     * GET https://api.xpay.app/checkout/sessions/{session_id}
      *
-     * Uses the set LarapayTransaction's refrance (and updates its status),
-     * or a plain refrance set via ->set(refrance: $uuid).
+     * Retrieves the Checkout Session status and updates the linked LarapayTransaction.
      */
-    public function check(?string $transactionUuid = null): static
+    public function check(?string $sessionId = null): static
     {
         if ($this->hasError()) return $this;
 
-        $uuid = $transactionUuid ?? $this->transaction?->refrance ?? $this->refrance;
+        $id = $sessionId ?? $this->transaction?->refrance ?? $this->refrance;
 
-        if (! $uuid) {
-            $this->error = __('No XPay transaction UUID to check.');
+        if (! $id) {
+            $this->error = __('No XPay session ID to check.');
             return $this;
         }
 
-        $this->request(
-            'get',
-            $this->endpoint . "communities/{$this->community_id}/transactions/{$uuid}/"
-        );
+        $this->request('get', $this->endpoint . 'checkout/sessions/' . urlencode($id));
 
         if ($this->hasError()) return $this;
 
-        $this->callbackData = (array) ($this->json()->data ?? []);
-        $this->refrance     = $uuid;
+        $json                    = $this->json();
+        $this->callbackData      = json_decode(json_encode($json), true) ?: [];
+        $this->refrance          = (string) ($json->id ?? $id);
+        $this->payment_intent_id = $this->extractPaymentIntentId($this->callbackData) ?? $this->payment_intent_id;
+        $this->charge_id         = $this->extractChargeId($this->callbackData) ?? $this->charge_id;
 
         if ($this->transaction) {
             $this->updateTransaction();
@@ -314,12 +301,14 @@ class XPay extends LarapayBase implements LarapayInterface
     }
 
     // =========================================================================
-    // Refund
+    // Refund (POST /refunds)
     // =========================================================================
 
     /**
-     * POST /api/payments/refund-transaction/  (note: no /v1 in this path)
-     * Partial refund if amount < paid amount, full refund otherwise.
+     * POST https://api.xpay.app/refunds
+     * Supports full and partial refunds in minor units.
+     * Automatically resolves `paymentIntentId` (`pi_...`) or `chargeId` (`ch_...`)
+     * from the stored transaction or by querying the Checkout Session (`cs_...`).
      */
     public function refund(?float $amount = null, ?string $reason = null): static
     {
@@ -328,26 +317,56 @@ class XPay extends LarapayBase implements LarapayInterface
 
         if ($this->hasError()) return $this;
 
-        $uuid = $this->transaction?->refrance ?? $this->refrance;
-
-        if (! $uuid) {
-            $this->error = __('XPay transaction UUID is required for refunds.');
-            return $this;
-        }
         if (! $this->amount || $this->amount <= 0) {
             $this->error = __('A positive refund amount is required.');
             return $this;
         }
 
-        $this->request('post', $this->host() . '/api/payments/refund-transaction/', [
-            'transaction_uuid' => $uuid,
-            'refund_amount'    => round((float) $this->amount, 2),
-        ]);
+        [$paymentIntentId, $chargeId] = $this->resolveRefundTargets();
+
+        if (! $paymentIntentId && ! $chargeId) {
+            $this->error = __('Could not determine XPay PaymentIntent ID (pi_...) or Charge ID (ch_...) for this transaction.');
+            return $this;
+        }
+
+        $rawReason = trim((string) ($this->reason ?? ''));
+        $enumReason = in_array($rawReason, self::ALLOWED_REFUND_REASONS, true)
+            ? $rawReason
+            : 'requested_by_customer';
+
+        $body = [
+            'amount' => $this->toMinorUnits((float) $this->amount),
+            'reason' => $enumReason,
+        ];
+
+        if ($paymentIntentId) {
+            $body['paymentIntentId'] = $paymentIntentId;
+        } else {
+            $body['chargeId'] = $chargeId;
+        }
+
+        if ($rawReason !== '' && ! in_array($rawReason, self::ALLOWED_REFUND_REASONS, true)) {
+            $body['description'] = Str::limit($rawReason, 250, '');
+        }
+
+        $orderRef = (string) ($this->transaction?->uid ?? $this->cart_id ?? $this->uid ?? '');
+        if ($orderRef !== '') {
+            $body['metadata'] = ['order_id' => $orderRef];
+        }
+
+        $this->request('post', $this->endpoint . 'refunds', $body);
 
         if ($this->hasError()) return $this;
 
-        $this->callbackData = (array) ($this->json()->data ?? []);
-        $this->refrance     = $uuid;
+        $json               = $this->json();
+        $this->callbackData = json_decode(json_encode($json), true) ?: [];
+        $this->refund_id    = isset($json->id) ? (string) $json->id : null;
+
+        if (! $this->refundAccepted()) {
+            $status = $json->status ?? 'unknown';
+            $this->error = __("XPay refund did not succeed (status: {$status}).");
+            return $this;
+        }
 
         if ($this->transaction) {
             $this->registerRefund();
@@ -356,24 +375,165 @@ class XPay extends LarapayBase implements LarapayInterface
         return $this;
     }
 
+    /**
+     * Resolve `[paymentIntentId, chargeId]` from explicit properties, stored
+     * transaction JSON, or a live `check()` call if only `cs_...` is known.
+     *
+     * @return array{0: ?string, 1: ?string}
+     */
+    protected function resolveRefundTargets(): array
+    {
+        $piId = $this->payment_intent_id;
+        $chId = $this->charge_id;
+
+        $ref = (string) ($this->transaction?->refrance ?? $this->refrance ?? '');
+        if (! $piId && str_starts_with($ref, 'pi_')) {
+            $piId = $ref;
+        }
+        if (! $chId && str_starts_with($ref, 'ch_')) {
+            $chId = $ref;
+        }
+
+        if (! $piId && ! $chId && $this->transaction && ! empty($this->transaction->response)) {
+            $stored = json_decode($this->transaction->response, true);
+            if (is_array($stored)) {
+                $piId = $this->extractPaymentIntentId($stored);
+                $chId = $this->extractChargeId($stored);
+            }
+        }
+
+        // If still missing and we have a Checkout Session ID (cs_...), fetch it from XPay
+        if (! $piId && ! $chId && $ref !== '' && str_starts_with($ref, 'cs_')) {
+            $savedAmount = $this->amount;
+            $savedReason = $this->reason;
+            $this->check($ref);
+            $this->amount = $savedAmount;
+            $this->reason = $savedReason;
+
+            if ($this->hasError()) {
+                return [null, null];
+            }
+
+            $piId = $this->payment_intent_id;
+            $chId = $this->charge_id;
+        }
+
+        return [$piId, $chId];
+    }
+
+    protected function extractPaymentIntentId(array $data): ?string
+    {
+        if (! empty($data['paymentIntentId']) && is_string($data['paymentIntentId'])) {
+            return $data['paymentIntentId'];
+        }
+        if (! empty($data['payment_intent_id']) && is_string($data['payment_intent_id'])) {
+            return $data['payment_intent_id'];
+        }
+        if (! empty($data['paymentIntent'])) {
+            if (is_string($data['paymentIntent'])) {
+                return $data['paymentIntent'];
+            }
+            if (is_array($data['paymentIntent']) && ! empty($data['paymentIntent']['id'])) {
+                return (string) $data['paymentIntent']['id'];
+            }
+        }
+        return null;
+    }
+
+    protected function extractChargeId(array $data): ?string
+    {
+        if (! empty($data['chargeId']) && is_string($data['chargeId'])) {
+            return $data['chargeId'];
+        }
+        if (! empty($data['paymentIntent']['charges'][0]['id'])) {
+            return (string) $data['paymentIntent']['charges'][0]['id'];
+        }
+        if (! empty($data['charges'][0]['id'])) {
+            return (string) $data['charges'][0]['id'];
+        }
+        return null;
+    }
+
     // =========================================================================
-    // Status helpers
+    // Webhook Signature Verification
+    // =========================================================================
+
+    /**
+     * Verify the `XPay-Signature: t=1730000000,v1=a1b2c3...` header using HMAC-SHA256.
+     */
+    public function verifyWebhookSignature(
+        string $rawBody,
+        ?string $signatureHeader,
+        ?string $webhookSecret = null,
+        int $tolerance = 300
+    ): bool {
+        $secret = $webhookSecret ?? $this->webhook_secret;
+        if (empty($secret) || empty($signatureHeader)) {
+            return false;
+        }
+
+        $parts = [];
+        foreach (explode(',', $signatureHeader) as $segment) {
+            [$k, $v] = array_pad(explode('=', trim($segment), 2), 2, null);
+            if ($k !== null && $v !== null) {
+                $parts[$k] = $v;
+            }
+        }
+
+        $timestamp = $parts['t'] ?? null;
+        $signature = $parts['v1'] ?? null;
+
+        if (! $timestamp || ! $signature || ! ctype_digit((string) $timestamp)) {
+            return false;
+        }
+
+        if ($tolerance > 0 && abs(time() - (int) $timestamp) > $tolerance) {
+            return false;
+        }
+
+        $expected = hash_hmac('sha256', "{$timestamp}.{$rawBody}", $secret);
+
+        return hash_equals($expected, $signature);
+    }
+
+    // =========================================================================
+    // Status & Amount Helpers
     // =========================================================================
 
     public function getStatus(): ?string
     {
-        $status = $this->callbackData['status'] ?? $this->callbackData['transaction_status'] ?? null;
+        $paymentStatus = $this->callbackData['paymentStatus'] ?? $this->callbackData['payment_status'] ?? null;
+        if ($paymentStatus) {
+            return strtoupper((string) $paymentStatus);
+        }
+
+        $status = $this->callbackData['status'] ?? null;
         return $status ? strtoupper((string) $status) : null;
     }
 
     public function paymentAccepted(): bool
     {
-        return in_array($this->getStatus(), $this->acceptedSuccessStatus, true);
+        $paymentStatus = strtolower((string) ($this->callbackData['paymentStatus'] ?? $this->callbackData['payment_status'] ?? ''));
+        $status        = strtolower((string) ($this->callbackData['status'] ?? ''));
+
+        if ($paymentStatus === 'paid') {
+            return true;
+        }
+
+        return in_array($status, ['succeeded', 'paid', 'successful', 'captured'], true);
     }
 
     public function paymentCancelled(): bool
     {
-        return in_array($this->getStatus(), $this->cancelledStatus, true);
+        if ($this->paymentAccepted()) {
+            return false;
+        }
+
+        $status   = strtolower((string) ($this->callbackData['status'] ?? ''));
+        $piStatus = strtolower((string) ($this->callbackData['paymentIntent']['status'] ?? ''));
+
+        return in_array($status, ['expired', 'canceled', 'cancelled', 'failed'], true)
+            || in_array($piStatus, ['canceled', 'cancelled', 'payment_failed', 'failed'], true);
     }
 
     public function paymentPending(): bool
@@ -383,34 +543,57 @@ class XPay extends LarapayBase implements LarapayInterface
 
     public function refundAccepted(): bool
     {
-        if (! isset($this->response) || ! $this->response->successful()) return false;
-        $code = (int) ($this->json()->status->code ?? $this->response->status());
-        return $code >= 200 && $code < 300;
+        if (! isset($this->response) || ! $this->response->successful()) {
+            return false;
+        }
+        $status = strtolower((string) ($this->callbackData['status'] ?? ''));
+        return in_array($status, ['succeeded', 'pending', 'success'], true);
     }
 
-    /** Amount reported by XPay for the checked transaction. */
+    /**
+     * Decimal amount reported by XPay for the checked session (converted from minor units).
+     */
     public function getPaidAmount(): ?float
     {
-        $amount = $this->callbackData['total_amount'] ?? null;
-        return is_numeric($amount) ? (float) $amount : null;
+        if (isset($this->callbackData['amountTotal']) && is_numeric($this->callbackData['amountTotal'])) {
+            return $this->fromMinorUnits((int) $this->callbackData['amountTotal']);
+        }
+        if (isset($this->callbackData['amount']) && is_numeric($this->callbackData['amount'])) {
+            return $this->fromMinorUnits((int) $this->callbackData['amount']);
+        }
+        return null;
     }
 
-    /** Currency reported by XPay for the checked transaction. */
+    /**
+     * Uppercase currency code reported by XPay for the checked session.
+     */
     public function getPaidCurrency(): ?string
     {
-        $currency = $this->callbackData['total_amount_currency'] ?? null;
+        $currency = $this->callbackData['currency'] ?? null;
         return $currency ? strtoupper((string) $currency) : null;
     }
 
     public function getTransactionUuid(): ?string { return $this->refrance; }
-    public function getTransactionId(): ?int      { return $this->transaction_id; }
+    public function getPaymentIntentId(): ?string { return $this->payment_intent_id; }
+    public function getChargeId(): ?string        { return $this->charge_id; }
+    public function getRefundId(): ?string        { return $this->refund_id; }
     public function getIframeUrl(): ?string       { return $this->iframe_url; }
     public function getTotalAmount(): ?float      { return $this->total_amount; }
     public function getData(): array              { return $this->callbackData; }
     public function hasTocken(): bool             { return false; }
 
+    protected function toMinorUnits(float $amount): int
+    {
+        return (int) round($amount * 100);
+    }
+
+    protected function fromMinorUnits(int $minorAmount): float
+    {
+        return round($minorAmount / 100, 2);
+    }
+
     // =========================================================================
-    // Transaction persistence
+    // Transaction Persistence
     // =========================================================================
 
     /**
@@ -453,7 +636,7 @@ class XPay extends LarapayBase implements LarapayInterface
         $tx->mode      = $parent->mode ?? $this->mode;
         $tx->uid       = $parent->uid;
         $tx->gateway   = $this->gateway;
-        $tx->refrance  = $parent->refrance . '-refund-' . uniqid();
+        $tx->refrance  = $this->refund_id ?: ($parent->refrance . '-refund-' . uniqid());
         $tx->amount    = $this->amount ?? 0;
         $tx->currency  = $parent->currency;
         $tx->response  = json_encode($this->callbackData ?: []);
@@ -463,12 +646,12 @@ class XPay extends LarapayBase implements LarapayInterface
     }
 
     // =========================================================================
-    // HTTP
+    // HTTP Client
     // =========================================================================
 
     /**
-     * Send a request with the x-api-key header and parse XPay's error envelope:
-     *   { "status": { "code": 400, "message": "", "errors": [ {...} ] }, "data": {} }
+     * Send a request with Bearer `sk_...` authentication and parse XPay's error format:
+     *   { "error": { "type": "...", "code": "...", "message": "...", "param": "..." }, "request_id": "req_..." }
      */
     protected function request(string $method, string $url, array $data = []): void
     {
@@ -476,10 +659,14 @@ class XPay extends LarapayBase implements LarapayInterface
         $this->errors = [];
 
         $headers = [
-            'x-api-key'    => $this->api_key,
-            'Accept'       => 'application/json',
-            'Content-Type' => 'application/json',
+            'Authorization' => 'Bearer ' . $this->secret_key,
+            'Accept'        => 'application/json',
+            'Content-Type'  => 'application/json',
         ];
+
+        if ($method === 'post') {
+            $headers['Idempotency-Key'] = (string) Str::uuid();
+        }
 
         if (config('larapay.debug')) {
             Log::info('[Larapay][XPay] ' . strtoupper($method) . " {$url}", ['data' => $data]);
@@ -500,40 +687,49 @@ class XPay extends LarapayBase implements LarapayInterface
         }
 
         if (config('larapay.debug')) {
-            Log::info('[Larapay][XPay] Response', ['status' => $this->response->status(), 'body' => $this->response->body()]);
+            Log::info('[Larapay][XPay] Response', [
+                'status' => $this->response->status(),
+                'body'   => $this->response->body(),
+            ]);
+        }
+
+        if ($this->response->successful()) {
+            return;
         }
 
         $json = $this->response->object();
-        $code = (int) ($json->status->code ?? $this->response->status());
 
-        if ($this->response->successful() && $code >= 200 && $code < 300) {
-            return;
-        }
-
-        foreach ((array) ($json->status->errors ?? []) as $err) {
-            $this->collectErrors($err);
-        }
-
-        $message = trim((string) ($json->status->message ?? ''));
-        $this->error = $message !== ''
-            ? $message
-            : ($this->errors[0] ?? "{$this->response->status()}: {$this->response->reason()}");
-    }
-
-    private function collectErrors(mixed $err, string $prefix = ''): void
-    {
-        if (is_string($err)) {
-            $this->errors[] = $prefix ? "{$prefix}: {$err}" : $err;
-            return;
-        }
-        foreach ((array) $err as $field => $value) {
-            $label = is_int($field) ? $prefix : ($prefix ? "{$prefix}.{$field}" : $field);
-            if (is_array($value) && array_is_list($value) && isset($value[0]) && is_string($value[0])) {
-                $this->errors[] = "{$label}: {$value[0]}";
-            } else {
-                $this->collectErrors($value, $label);
+        // Modern XPay error object: { "error": { "type": "...", "code": "...", "message": "..." } }
+        if (isset($json->error)) {
+            if (is_string($json->error)) {
+                $this->errors[] = $json->error;
+                $this->error    = $json->error;
+                return;
+            }
+            if (is_object($json->error)) {
+                $msg = trim((string) ($json->error->message ?? $json->error->code ?? ''));
+                if (! empty($json->error->details) && is_array($json->error->details)) {
+                    foreach ($json->error->details as $detail) {
+                        $detailMsg = is_object($detail)
+                            ? trim(($detail->field ?? '') . ': ' . ($detail->message ?? ''))
+                            : (string) $detail;
+                        if ($detailMsg !== '') {
+                            $this->errors[] = $detailMsg;
+                        }
+                    }
+                }
+                if ($msg !== '') {
+                    $this->errors[] = $msg;
+                    $this->error    = $msg;
+                    return;
+                }
             }
         }
+
+        $fallbackMessage = trim((string) ($json->message ?? ''));
+        $this->error = $fallbackMessage !== ''
+            ? $fallbackMessage
+            : ($this->errors[0] ?? "{$this->response->status()}: {$this->response->reason()}");
     }
 
     public function json(): object|null
@@ -541,16 +737,11 @@ class XPay extends LarapayBase implements LarapayInterface
         if (isset($this->response)) {
             return $this->response->object();
         }
-        return $this->callbackData ? (object) $this->callbackData : null;
+        return $this->callbackData ? json_decode(json_encode($this->callbackData)) : null;
     }
 
     public function responseBody(): ?string
     {
         return isset($this->response) ? $this->response->body() : null;
-    }
-
-    protected function host(): string
-    {
-        return $this->mode === 'live' ? self::HOST_LIVE : self::HOST_TEST;
     }
 }
