@@ -9,6 +9,7 @@ use Larapay\Core\Gateways\PayPal;
 use Larapay\Core\Gateways\PayTabs;
 use Larapay\Core\Gateways\PayMob;
 use Larapay\Core\Gateways\Tab;
+use Larapay\Core\Gateways\XPay;
 
 class LarapayManager extends Manager
 {
@@ -68,6 +69,14 @@ class LarapayManager extends Manager
     protected function createTabDriver()
     {
         return (new Tab(gateway: 'tab', mode: $this->getMode()))->init();
+    }
+
+    /**
+     * Create an instance of the XPay driver.
+     */
+    protected function createXpayDriver()
+    {
+        return (new XPay(gateway: 'xpay', mode: $this->getMode()))->init();
     }
 
     /**

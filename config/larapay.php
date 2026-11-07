@@ -91,7 +91,7 @@ return [
     ],
 
     // Accepted Gateways
-    'gateways' => ['paypal', 'paytabs', 'paymob', 'kashier', 'payfort', 'tab'],
+    'gateways' => ['paypal', 'paytabs', 'paymob', 'kashier', 'payfort', 'tab', 'xpay'],
 
     'payfort' => [
         'live' => [
@@ -127,6 +127,22 @@ return [
             'public_key' => env('TAB_SANDBOX_PUBLIC_KEY', ''),
         ],
         'custom_checkout_url' => env('TAB_CUSTOM_CHECKOUT_URL', ''),
+        'server_callback' => null,
+        'client_callback' => null,
+    ],
+    'xpay' => [
+        'community_id'       => env('XPAY_COMMUNITY_ID', ''),
+        'variable_amount_id' => env('XPAY_VARIABLE_AMOUNT_ID', ''),
+        'live' => [
+            'api_key' => env('XPAY_LIVE_API_KEY', ''),
+        ],
+        'sandbox' => [
+            'api_key' => env('XPAY_SANDBOX_API_KEY', ''),
+        ],
+        'currency'        => env('XPAY_CURRENCY', 'USD'),
+        'pay_using'       => env('XPAY_PAY_USING', 'card'),
+        'language'        => env('XPAY_LANGUAGE', 'en'),
+        'add_fees'        => env('XPAY_ADD_FEES', false),
         'server_callback' => null,
         'client_callback' => null,
     ],

@@ -116,6 +116,23 @@ class LarapayController extends Controller
           ['label' => 'Test Hosted Checkout', 'url' => route('larapay.payfort'), 'icon' => 'ti-arrow-right', 'style' => 'primary', 'currency' => 'AED', 'action' => 'default'],
         ],
       ],
+      [
+        'key'         => 'xpay',
+        'label'       => 'XPay',
+        'region'      => 'Egypt / MENA',
+        'icon'        => 'ti-credit-card',
+        'color'       => 'cyan',
+        'description' => 'XPay variable-amount hosted checkout supporting cards, Fawry, Aman kiosk, mobile wallets and ValU.',
+        'currencies'  => ['USD', 'EGP', 'EUR', 'GBP', 'SAR', 'AED'],
+        'methods'     => ['Card', 'Fawry', 'Kiosk', 'Wallet', 'ValU'],
+        'configured'  => !empty(config("larapay.xpay.{$mode}.api_key"))
+                      && !empty(config('larapay.xpay.community_id'))
+                      && !empty(config('larapay.xpay.variable_amount_id')),
+        'refundable'  => true,
+        'actions' => [
+          ['label' => 'Test XPay Checkout', 'url' => '#', 'icon' => 'ti-arrow-right', 'style' => 'primary', 'currency' => 'USD', 'action' => 'default'],
+        ],
+      ],
     ];
 
     $transactions = LarapayTransaction::with('children')
@@ -148,7 +165,7 @@ class LarapayController extends Controller
     $transaction = LarapayTransaction::findOrFail($request->transaction_id);
 
     // Gateways that support refund
-    $refundable = ['paytabs', 'payfort', 'kashier'];
+    $refundable = ['paytabs', 'payfort', 'kashier', 'xpay'];
     if (! in_array($transaction->gateway, $refundable)) {
       return response()->json([
         'success' => false,
@@ -192,6 +209,16 @@ class LarapayController extends Controller
               reason: 'Customer refund request'
             )
             ->refund();
+          break;
+
+        case 'xpay':
+          $refund = $larapay
+            ->set(
+              amount: (float) $request->amount,
+              transaction: $transaction,
+              reason: 'Customer refund request'
+            )
+            ->refund((float) $request->amount);
           break;
       }
 
@@ -265,6 +292,9 @@ class LarapayController extends Controller
       case 'kashier':
         $check     = $larapay->set(transaction: $transaction)->check();
         break;
+      case 'xpay':
+        $check     = $larapay->set(transaction: $transaction)->check();
+        break;
       default:
         return response()->json([
           'success' => false,
@@ -316,7 +346,7 @@ class LarapayController extends Controller
   public function testPay(Request $request)
   {
     $request->validate([
-      'gateway'          => 'required|string|in:paytabs,paymob,kashier,payfort',
+      'gateway'          => 'required|string|in:paytabs,paymob,kashier,payfort,xpay',
       'action'           => 'nullable|string',
       // cart
       'cart_amount'      => 'required|numeric|min:0.01',
@@ -419,6 +449,17 @@ class LarapayController extends Controller
         if ($pay->hasError()) { echo $pay->getError(); return; }
         $pay->register();
         return $pay->getPayForm();
+
+      case 'xpay':
+        $larapay->billing(
+          name:  $request->billing_name,
+          email: $request->billing_email,
+          phone: $request->billing_phone ?: '+201000000000',
+        );
+        $pay = $larapay->pay();
+        if ($pay->hasError()) { echo $pay->getError(); return; }
+        $pay->register();
+        return redirect($pay->getRedirect());
     }
   }
   public function test()
