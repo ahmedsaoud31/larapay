@@ -196,6 +196,7 @@ class XPay extends LarapayBase implements LarapayInterface
         $metadata = array_filter($metadata, fn ($v) => $v !== null && $v !== '');
 
         $body = [
+            'currency'        => $this->currency,
             'afterCompletion' => [
                 'type'     => 'redirect',
                 'redirect' => [
