@@ -326,6 +326,10 @@ class LarapayController extends Controller
       $transaction->save();
     }
 
+    if ($transaction->status === 'success' && $transaction->type !== 'refund' && class_exists(\App\Services\Payments\XPayService::class)) {
+      app(\App\Services\Payments\XPayService::class)->markPayableAsPaid($transaction);
+    }
+
     return response()->json([
       'success'   => true,
       'gateway'   => $transaction->gateway,

@@ -8,6 +8,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class LarapayTransaction extends Model
 {
+  protected $guarded = [];
+
   /**
    * Get the parent transactionable model.
    */
